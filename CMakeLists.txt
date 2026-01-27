@@ -58,7 +58,7 @@ add_library(modbus_lib STATIC lib/modbus.c)
 add_library(datalogger_lib STATIC lib/datalogger.c)
 add_library(usb_manager STATIC lib/usb_manager.c)
 add_library(relay_control STATIC lib/relay_control.c)
-add_library(reset_button STATIC lib/reset_button.c)
+add_library(keyboard STATIC lib/keyboard.c)
 add_library(oled_ssd1306 STATIC lib/oled_ssd1306.c)
 
 # Executável principal
@@ -73,7 +73,7 @@ target_link_libraries(app_armv7
     datalogger_lib
     usb_manager
     relay_control
-    reset_button
+    keyboard
     oled_ssd1306
     # Usar bibliotecas estáticas (.a) ao invés de compartilhadas (.so)
     ${LIBMODBUS_DIR}/lib/libmodbus.a

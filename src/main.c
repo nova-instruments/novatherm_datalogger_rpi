@@ -24,7 +24,7 @@
 #include "datalogger.h"
 #include "usb_manager.h"
 #include "relay_control.h"
-#include "reset_button.h"
+#include "keyboard.h"
 #include "oled_ssd1306.h"
 
 // Configurações da aplicação
@@ -215,11 +215,11 @@ int main(void) {
         printf("⚡ Compressor e resistência acionados automaticamente\n");
     }
 
-    // Inicializar botão de reset
-    if (reset_button_init() != 0) {
-        printf("⚠️  Aviso: Falha ao inicializar botão de reset (continuando sem esta funcionalidade)\n");
+    // Inicializar teclado (5 botões)
+    if (keyboard_init() != 0) {
+        printf("⚠️  Aviso: Falha ao inicializar teclado (continuando sem esta funcionalidade)\n");
     } else {
-        printf("✅ Botão de reset ativo\n");
+        printf("✅ Teclado ativo\n");
     }
 
     // Inicializar display OLED
@@ -267,20 +267,22 @@ int main(void) {
     time_t last_periodic_log = time(NULL);
 
     while (running) {
-        // Verificar botão de reset
-        if (reset_button_is_pressed()) {
-            printf("\n🔘 BOTÃO DE RESET PRESSIONADO!\n");
-            printf("⚠️  Aguarde 3 segundos para confirmar...\n");
+        // Verificar botões do teclado
+
+        // Botão SEL - Reset de logs
+        if (keyboard_sel_is_pressed()) {
+            printf("\n🔘 BOTÃO SEL PRESSIONADO!\n");
+            printf("⚠️  Aguarde 3 segundos para confirmar reset de logs...\n");
 
             // Aguardar 3 segundos para confirmar (evitar acionamento acidental)
             sleep(3);
 
             // Verificar novamente se ainda está pressionado
-            if (reset_button_is_pressed()) {
+            if (keyboard_sel_is_pressed()) {
                 printf("🗑️  CONFIRMADO! Apagando todos os logs...\n\n");
 
                 // Apagar todos os logs
-                if (reset_delete_all_logs("/home/nova")) {
+                if (keyboard_delete_all_logs("/home/nova")) {
                     printf("✅ Todos os logs foram apagados com sucesso!\n");
 
                     // Sinalizar com buzzer (5 beeps longos)
@@ -312,8 +314,8 @@ int main(void) {
                 }
 
                 // Aguardar soltar o botão
-                printf("💡 Solte o botão de reset...\n");
-                while (reset_button_is_pressed() && running) {
+                printf("💡 Solte o botão SEL...\n");
+                while (keyboard_sel_is_pressed() && running) {
                     sleep(1);
                 }
                 printf("✅ Botão liberado. Continuando operação normal.\n\n");
@@ -322,18 +324,24 @@ int main(void) {
             }
         }
 
+        // Verificar outros botões (apenas print temporário)
+        keyboard_dec_is_pressed();
+        keyboard_inc_is_pressed();
+        keyboard_before_is_pressed();
+        keyboard_next_is_pressed();
+
         modbus_data_t data;
         bool should_log = false;
         bool is_door_change = false;
         bool is_alarm_change = false;
 
-        printf("Lendo registradores Modbus...\n");
+        // printf("Lendo registradores Modbus...\n");
 
         if (modbus_read_all(modbus_ctx, &data)) {
             // ✅ LEITURA BEM-SUCEDIDA - Processar dados normalmente
 
             // Exibir dados na tela
-            modbus_print_data(&data);
+            // modbus_print_data(&data);
 
             // NT18B07: Não há porta nem alarme, apenas 7 canais de temperatura
             // Log periódico será feito a cada 5 minutos
@@ -343,23 +351,23 @@ int main(void) {
             if (!should_log && (current_time - last_periodic_log) >= LOOP_INTERVAL_SECONDS) {
                 should_log = true;
                 last_periodic_log = current_time;
-                printf("⏰ Log periódico (5 minutos)\n");
+                // printf("⏰ Log periódico (5 minutos)\n");
             }
 
             // ✅ GRAVAR NO DATALOGGER (apenas quando leitura foi bem-sucedida)
             if (should_log) {
                 if (datalogger_log_data(datalogger_ctx, &data)) {
                     if (is_door_change) {
-                        printf("✅ Mudança de porta registrada imediatamente no log\n");
+                        // printf("✅ Mudança de porta registrada imediatamente no log\n");
                         door_change_logs++;
                     } else if (is_alarm_change) {
-                        printf("✅ Mudança de alarme registrada imediatamente no log\n");
+                        // printf("✅ Mudança de alarme registrada imediatamente no log\n");
                         alarm_change_logs++;
                     } else {
-                        printf("✅ Dados registrados no log (periódico)\n");
+                        // printf("✅ Dados registrados no log (periódico)\n");
                     }
                 } else {
-                    printf("❌ Erro ao registrar dados no log\n");
+                    // printf("❌ Erro ao registrar dados no log\n");
                 }
             }
 
@@ -371,8 +379,8 @@ int main(void) {
 
         } else {
             // ❌ ERRO NA LEITURA MODBUS
-            printf("❌ Erro: Falha na leitura de todos os registradores Modbus\n");
-            printf("⚠️  NÃO será gravado no datalogger (dados inválidos)\n");
+            // printf("❌ Erro: Falha na leitura de todos os registradores Modbus\n");
+            // printf("⚠️  NÃO será gravado no datalogger (dados inválidos)\n");
 
             // 🔊 Emitir alarme sonoro de erro (1 beep longo) - se habilitado
             if (ENABLE_MODBUS_ERROR_ALARM) {
@@ -407,7 +415,7 @@ int main(void) {
     printf("Mudanças de alarme registradas: %u\n", alarm_change_logs);
 
     // Limpar recursos
-    reset_button_cleanup();
+    keyboard_cleanup();
     relay_cleanup();
     if (oled_ctx) {
         oled_cleanup(oled_ctx);
