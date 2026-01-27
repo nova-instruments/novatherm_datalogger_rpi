@@ -1,0 +1,179 @@
+# COEL E33 DataLogger RPi - GitIgnore
+
+# =============================================================================
+# Diretórios de Build e Dependências
+# =============================================================================
+
+# Diretório de dependências compiladas (libmodbus, libgpiod, eudev)
+deps/
+deps-armv6/
+
+# Diretórios de build
+build/
+build-*/
+cmake-build-*/
+
+# =============================================================================
+# Arquivos Compilados e Executáveis
+# =============================================================================
+
+# Executáveis
+*.exe
+*.out
+*.app
+modbus_reader
+coel_e33_datalogger
+
+# Arquivos objeto
+*.o
+*.obj
+*.ko
+*.elf
+
+# Bibliotecas
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# =============================================================================
+# Arquivos de Build System
+# =============================================================================
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# Makefile gerados (mas manter o principal)
+build*/Makefile
+deps/*/Makefile*
+
+# Autotools
+.deps/
+.libs/
+*.la
+*.lo
+config.log
+config.status
+configure
+autom4te.cache/
+aclocal.m4
+compile
+config.guess
+config.sub
+depcomp
+install-sh
+ltmain.sh
+missing
+stamp-h1
+
+# =============================================================================
+# Arquivos de Sistema e Temporários
+# =============================================================================
+
+# Logs
+*.log
+*.tmp
+
+# Arquivos de backup
+*~
+*.bak
+*.swp
+*.swo
+*#
+
+# Arquivos do sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# IDEs e Editores
+# =============================================================================
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# CLion
+.idea/
+
+# Eclipse
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# =============================================================================
+# Arquivos de Configuração Local
+# =============================================================================
+
+# Configurações locais de IP/usuário
+.env
+.env.local
+config.local
+config.txt
+
+# Chaves SSH (caso sejam copiadas por engano)
+*.pem
+*.key
+id_rsa*
+
+# =============================================================================
+# Arquivos de Deploy e Teste
+# =============================================================================
+
+# Logs de build e deploy
+/tmp/cmake_config.log
+/tmp/build_test.log
+/tmp/deploy.log
+
+# Arquivos de teste
+test_output/
+*.test
+
+# =============================================================================
+# Arquivos Específicos do Projeto
+# =============================================================================
+
+# Backups de configuração
+lv_conf.h.backup
+*.conf.backup
+
+# Arquivos de download temporários
+*.tar.gz.tmp
+*.zip.tmp
