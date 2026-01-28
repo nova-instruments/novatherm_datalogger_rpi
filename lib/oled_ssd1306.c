@@ -240,6 +240,8 @@ oled_context_t* oled_init(void) {
     oled_send_command(ctx, OLED_CMD_DISPLAY_ON);
 
     ctx->initialized = true;
+    ctx->current_screen = SCREEN_TEMPERATURES;  // Iniciar na tela de temperaturas
+    ctx->setpoint = 5.0;  // Setpoint inicial: 5.0°C
 
     // Limpar display
     oled_clear(ctx);
@@ -454,4 +456,143 @@ void oled_display_error(oled_context_t* ctx, const char* error_msg) {
     oled_draw_string(ctx, 40, 32, "MODBUS");
 
     oled_display(ctx);
+}
+
+/**
+ * @brief Navega para a próxima tela
+ */
+void oled_next_screen(oled_context_t* ctx) {
+    if (!ctx) return;
+
+    ctx->current_screen = (ctx->current_screen + 1) % SCREEN_COUNT;
+}
+
+/**
+ * @brief Navega para a tela anterior
+ */
+void oled_previous_screen(oled_context_t* ctx) {
+    if (!ctx) return;
+
+    if (ctx->current_screen == 0) {
+        ctx->current_screen = SCREEN_COUNT - 1;
+    } else {
+        ctx->current_screen--;
+    }
+}
+
+/**
+ * @brief Incrementa o setpoint em 0.5°C
+ */
+void oled_increment_setpoint(oled_context_t* ctx) {
+    if (!ctx) return;
+
+    ctx->setpoint += 0.5;
+    if (ctx->setpoint > 10.0) {
+        ctx->setpoint = 10.0;  // Limite máximo
+    }
+}
+
+/**
+ * @brief Decrementa o setpoint em 0.5°C
+ */
+void oled_decrement_setpoint(oled_context_t* ctx) {
+    if (!ctx) return;
+
+    ctx->setpoint -= 0.5;
+    if (ctx->setpoint < 0.0) {
+        ctx->setpoint = 0.0;  // Limite mínimo
+    }
+}
+
+/**
+ * @brief Obtém o valor atual do setpoint
+ */
+float oled_get_setpoint(oled_context_t* ctx) {
+    if (!ctx) return 0.0;
+    return ctx->setpoint;
+}
+
+/**
+ * @brief Exibe a tela de ajuste de setpoint
+ */
+void oled_display_setpoint_screen(oled_context_t* ctx) {
+    if (!ctx) return;
+
+    char buffer[32];
+
+    oled_clear(ctx);
+
+    // Título
+    oled_draw_string(ctx, 20, 0, "AJUSTE SETPOINT");
+    oled_draw_hline(ctx, 0, 10, 128);
+
+    // Valor do setpoint (grande, centralizado)
+    snprintf(buffer, sizeof(buffer), "%.1f C", ctx->setpoint);
+    oled_draw_string(ctx, 35, 28, buffer);
+
+    // Instruções
+    oled_draw_string(ctx, 10, 50, "INC/DEC: +/-0.5C");
+
+    oled_display(ctx);
+}
+
+/**
+ * @brief Exibe a tela de diagnóstico dos relés
+ */
+void oled_display_diagnostics_screen(oled_context_t* ctx, bool lamp_on, bool dialer_on,
+                                     bool compressor_on, bool heater_on) {
+    if (!ctx) return;
+
+    oled_clear(ctx);
+
+    // Título
+    oled_draw_string(ctx, 25, 0, "DIAGNOSTICO");
+    oled_draw_hline(ctx, 0, 10, 128);
+
+    // Status dos relés (2 colunas)
+    // Coluna esquerda
+    oled_draw_string(ctx, 0, 16, "Lampada:");
+    oled_draw_string(ctx, 70, 16, lamp_on ? "ON" : "OFF");
+
+    oled_draw_string(ctx, 0, 28, "Discadora:");
+    oled_draw_string(ctx, 70, 28, dialer_on ? "ON" : "OFF");
+
+    oled_draw_string(ctx, 0, 40, "Compressor:");
+    oled_draw_string(ctx, 70, 40, compressor_on ? "ON" : "OFF");
+
+    oled_draw_string(ctx, 0, 52, "Resistencia:");
+    oled_draw_string(ctx, 70, 52, heater_on ? "ON" : "OFF");
+
+    oled_display(ctx);
+}
+
+/**
+ * @brief Atualiza o display com a tela atual
+ */
+void oled_update_current_screen(oled_context_t* ctx, const char* device_name,
+                                const modbus_data_t* data, uint32_t record_count,
+                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on) {
+    if (!ctx) return;
+
+    switch (ctx->current_screen) {
+        case SCREEN_TEMPERATURES:
+            // Tela 1: Temperaturas (usa a função existente)
+            oled_display_datalogger_info(ctx, device_name, data, record_count);
+            break;
+
+        case SCREEN_SETPOINT:
+            // Tela 2: Ajuste de setpoint
+            oled_display_setpoint_screen(ctx);
+            break;
+
+        case SCREEN_DIAGNOSTICS:
+            // Tela 3: Diagnóstico dos relés
+            oled_display_diagnostics_screen(ctx, lamp_on, dialer_on, compressor_on, heater_on);
+            break;
+
+        default:
+            ctx->current_screen = SCREEN_TEMPERATURES;
+            oled_display_datalogger_info(ctx, device_name, data, record_count);
+            break;
+    }
 }

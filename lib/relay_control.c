@@ -348,3 +348,39 @@ int relay_control_lamp_by_door(bool door_open) {
     }
 }
 
+/**
+ * @brief Obtém o estado atual da lâmpada
+ */
+bool relay_lamp_is_on(void) {
+    if (!lamp_line) return false;
+    int value = gpiod_line_get_value(lamp_line);
+    return (value == 1);  // Lógica normal: HIGH = ON
+}
+
+/**
+ * @brief Obtém o estado atual da discadora
+ */
+bool relay_dialer_is_on(void) {
+    if (!dialer_line) return false;
+    int value = gpiod_line_get_value(dialer_line);
+    return (value == 1);  // Lógica normal: HIGH = ON
+}
+
+/**
+ * @brief Obtém o estado atual do compressor
+ */
+bool relay_compressor_is_on(void) {
+    if (!compressor_line) return false;
+    int value = gpiod_line_get_value(compressor_line);
+    return (value == 0);  // Lógica inversa: LOW = ON
+}
+
+/**
+ * @brief Obtém o estado atual da resistência
+ */
+bool relay_heater_is_on(void) {
+    if (!heater_line) return false;
+    int value = gpiod_line_get_value(heater_line);
+    return (value == 0);  // Lógica inversa: LOW = ON
+}
+

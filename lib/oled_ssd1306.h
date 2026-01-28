@@ -50,12 +50,22 @@ extern "C" {
 #define OLED_CMD_ACTIVATE_SCROLL        0x2F
 #define OLED_CMD_DEACTIVATE_SCROLL      0x2E
 
+// Enumeração das telas disponíveis
+typedef enum {
+    SCREEN_TEMPERATURES = 0,    // Tela 1: Temperaturas dos 7 canais
+    SCREEN_SETPOINT,            // Tela 2: Ajuste de setpoint
+    SCREEN_DIAGNOSTICS,         // Tela 3: Status dos relés
+    SCREEN_COUNT                // Total de telas
+} oled_screen_t;
+
 // Contexto do display OLED
 typedef struct oled_context_s {
     int i2c_fd;                     // File descriptor do I2C
     uint8_t address;                // Endereço I2C do display
     uint8_t buffer[OLED_WIDTH * OLED_HEIGHT / 8];  // Buffer de vídeo (1024 bytes)
     bool initialized;               // Flag de inicialização
+    oled_screen_t current_screen;   // Tela atual
+    float setpoint;                 // Setpoint ajustável (0.0 a 10.0°C)
 } oled_context_t;
 
 /**
@@ -142,6 +152,69 @@ void oled_display_error(oled_context_t* ctx, const char* error_msg);
  * @param device_name Nome do dispositivo
  */
 void oled_display_splash(oled_context_t* ctx, const char* device_name);
+
+/**
+ * @brief Navega para a próxima tela
+ * @param ctx Contexto do OLED
+ */
+void oled_next_screen(oled_context_t* ctx);
+
+/**
+ * @brief Navega para a tela anterior
+ * @param ctx Contexto do OLED
+ */
+void oled_previous_screen(oled_context_t* ctx);
+
+/**
+ * @brief Incrementa o setpoint em 0.5°C
+ * @param ctx Contexto do OLED
+ */
+void oled_increment_setpoint(oled_context_t* ctx);
+
+/**
+ * @brief Decrementa o setpoint em 0.5°C
+ * @param ctx Contexto do OLED
+ */
+void oled_decrement_setpoint(oled_context_t* ctx);
+
+/**
+ * @brief Obtém o valor atual do setpoint
+ * @param ctx Contexto do OLED
+ * @return Valor do setpoint em °C
+ */
+float oled_get_setpoint(oled_context_t* ctx);
+
+/**
+ * @brief Exibe a tela de ajuste de setpoint
+ * @param ctx Contexto do OLED
+ */
+void oled_display_setpoint_screen(oled_context_t* ctx);
+
+/**
+ * @brief Exibe a tela de diagnóstico dos relés
+ * @param ctx Contexto do OLED
+ * @param lamp_on Estado do relé da lâmpada
+ * @param dialer_on Estado do relé da discadora
+ * @param compressor_on Estado do relé do compressor
+ * @param heater_on Estado do relé da resistência
+ */
+void oled_display_diagnostics_screen(oled_context_t* ctx, bool lamp_on, bool dialer_on,
+                                     bool compressor_on, bool heater_on);
+
+/**
+ * @brief Atualiza o display com a tela atual
+ * @param ctx Contexto do OLED
+ * @param device_name Nome do dispositivo
+ * @param data Dados Modbus (para tela de temperaturas)
+ * @param record_count Número de registros
+ * @param lamp_on Estado do relé da lâmpada
+ * @param dialer_on Estado do relé da discadora
+ * @param compressor_on Estado do relé do compressor
+ * @param heater_on Estado do relé da resistência
+ */
+void oled_update_current_screen(oled_context_t* ctx, const char* device_name,
+                                const modbus_data_t* data, uint32_t record_count,
+                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on);
 
 #ifdef __cplusplus
 }

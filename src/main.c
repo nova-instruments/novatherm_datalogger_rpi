@@ -266,6 +266,11 @@ int main(void) {
     // Controle de tempo para log periódico
     time_t last_periodic_log = time(NULL);
 
+    // Variáveis para cache de dados Modbus (para atualização rápida do display)
+    modbus_data_t last_data = {0};
+    bool last_data_valid = false;
+    uint32_t last_total_logs = 0;
+
     while (running) {
         // Verificar botões do teclado
 
@@ -324,11 +329,7 @@ int main(void) {
             }
         }
 
-        // Verificar outros botões (apenas print temporário)
-        keyboard_dec_is_pressed();
-        keyboard_inc_is_pressed();
-        keyboard_before_is_pressed();
-        keyboard_next_is_pressed();
+
 
         modbus_data_t data;
         bool should_log = false;
@@ -371,10 +372,17 @@ int main(void) {
                 }
             }
 
-            // 📺 Atualizar display OLED com dados válidos
+            // Salvar dados válidos no cache
+            last_data = data;
+            last_data_valid = true;
+            last_total_logs = datalogger_ctx->record_counter;
+
+            // 📺 Atualizar display OLED com a tela atual
+            // (botões são verificados no loop de espera e atualizam imediatamente)
             if (oled_ctx) {
-                uint32_t total_logs = datalogger_ctx->record_counter;
-                oled_display_datalogger_info(oled_ctx, device_name, &data, total_logs);
+                oled_update_current_screen(oled_ctx, device_name, &data, last_total_logs,
+                                          relay_lamp_is_on(), relay_dialer_is_on(),
+                                          relay_compressor_is_on(), relay_heater_is_on());
             }
 
         } else {
@@ -393,12 +401,40 @@ int main(void) {
             }
         }
 
-        printf("----------------------------------------\n");
+        // Aguardar próxima leitura com verificação contínua de botões
+        // Total: 2 segundos, mas verifica botões a cada 50ms
+        for (int i = 0; i < 40 && running; i++) {
+            usleep(50000);  // 50ms
 
-        // Aguardar próxima leitura (verificação mais frequente para detectar mudanças)
-        // Verificar a cada 2 segundos em vez de 5 minutos
-        for (int i = 0; i < 2 && running; i++) {
-            sleep(1);
+            // Verificar botões durante a espera para resposta instantânea
+            bool button_pressed = false;
+
+            if (keyboard_next_is_pressed() && oled_ctx) {
+                oled_next_screen(oled_ctx);
+                button_pressed = true;
+            }
+
+            if (keyboard_before_is_pressed() && oled_ctx) {
+                oled_previous_screen(oled_ctx);
+                button_pressed = true;
+            }
+
+            if (keyboard_inc_is_pressed() && oled_ctx) {
+                oled_increment_setpoint(oled_ctx);
+                button_pressed = true;
+            }
+
+            if (keyboard_dec_is_pressed() && oled_ctx) {
+                oled_decrement_setpoint(oled_ctx);
+                button_pressed = true;
+            }
+
+            // Atualizar display imediatamente se botão foi pressionado
+            if (button_pressed && oled_ctx) {
+                oled_update_current_screen(oled_ctx, device_name, &last_data, last_total_logs,
+                                          relay_lamp_is_on(), relay_dialer_is_on(),
+                                          relay_compressor_is_on(), relay_heater_is_on());
+            }
         }
     }
 

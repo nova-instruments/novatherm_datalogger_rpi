@@ -91,6 +91,30 @@ int relay_heater_off(void);
  */
 int relay_control_lamp_by_door(bool door_open);
 
+/**
+ * @brief Obtém o estado atual da lâmpada
+ * @return true se ligada, false se desligada
+ */
+bool relay_lamp_is_on(void);
+
+/**
+ * @brief Obtém o estado atual da discadora
+ * @return true se ligada, false se desligada
+ */
+bool relay_dialer_is_on(void);
+
+/**
+ * @brief Obtém o estado atual do compressor
+ * @return true se ligado, false se desligado
+ */
+bool relay_compressor_is_on(void);
+
+/**
+ * @brief Obtém o estado atual da resistência
+ * @return true se ligada, false se desligada
+ */
+bool relay_heater_is_on(void);
+
 #ifdef __cplusplus
 }
 #endif
