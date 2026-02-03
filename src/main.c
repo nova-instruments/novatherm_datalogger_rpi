@@ -1,4 +1,4 @@
-/**
+/*
  * @file main.c
  * @brief COEL E33 DataLogger RPi - Main Application
  * @author Nova Instruments
@@ -10,8 +10,8 @@
 - Botao p/ temporização de lampada
 - Minima e maxima no datalogger
 - 
-
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -26,11 +26,17 @@
 #include "relay_control.h"
 #include "keyboard.h"
 #include "oled_ssd1306.h"
+#include "controller.h"
 
 // Configurações da aplicação
 #define LOOP_INTERVAL_SECONDS 300  // 5 minutos = 300 segundos
 #define DEFAULT_DEVICE_NAME "NI00002"  // Nome padrão do dispositivo
 #define CONFIG_FILE "/boot/firmware/config.txt"  // Arquivo de configuração do sistema
+
+// ⚙️ CONFIGURAÇÃO: Número de sensores NTC a serem lidos do NT18B07
+// Valores válidos: 1 a 7 (NT18B07 suporta até 7 canais)
+// Reduzir este valor acelera a leitura Modbus (cada canal leva ~50-100ms)
+static const int NUM_SENSORS_TO_READ = 4;
 
 // ⚙️ CONFIGURAÇÃO: Alarme de falta de comunicação Modbus
 // true  = Buzzer emite alarme quando há erro de comunicação com COEL
@@ -53,6 +59,7 @@ typedef struct {
  * @param buffer_size Tamanho do buffer
  * @return true se leu com sucesso, false caso contrário
  */
+
 static bool read_device_name_from_config(char* device_name, size_t buffer_size) {
     FILE* config_file = fopen(CONFIG_FILE, "r");
     if (!config_file) {
@@ -195,8 +202,8 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    // Inicializar DataLogger
-    datalogger_context_t* datalogger_ctx = datalogger_init(device_name);
+    // Inicializar DataLogger com número de canais configurado
+    datalogger_context_t* datalogger_ctx = datalogger_init(device_name, NUM_SENSORS_TO_READ);
     if (!datalogger_ctx) {
         fprintf(stderr, "Erro: Falha ao inicializar DataLogger\n");
         modbus_cleanup(modbus_ctx);
@@ -208,11 +215,7 @@ int main(void) {
         fprintf(stderr, "⚠️  Aviso: Falha ao inicializar relés (continuando sem controle de relés)\n");
     } else {
         printf("✅ Controle de relés ativo\n");
-
-        // Acionar compressor e resistência na inicialização
-        relay_compressor_on();
-        relay_heater_on();
-        printf("⚡ Compressor e resistência acionados automaticamente\n");
+        printf("ℹ️  Compressor e resistência serão controlados pelo controller\n");
     }
 
     // Inicializar teclado (5 botões)
@@ -247,6 +250,16 @@ int main(void) {
         printf("✅ Monitoramento USB ativo\n");
     }
 
+    // 🎛️ Inicializar controlador de temperatura
+    float initial_setpoint = oled_ctx ? oled_get_setpoint(oled_ctx) : 5.0f;
+    controller_context_t* controller_ctx = controller_init(initial_setpoint);
+    if (!controller_ctx) {
+        fprintf(stderr, "❌ Erro ao inicializar controlador de temperatura\n");
+        running = false;
+    } else {
+        printf("✅ Controlador de temperatura inicializado\n");
+    }
+
     printf("\nIniciando loop de aquisição de dados (intervalo: %d segundos = %d minutos)\n",
            LOOP_INTERVAL_SECONDS, LOOP_INTERVAL_SECONDS / 60);
     printf("Pressione Ctrl+C para finalizar\n");
@@ -270,6 +283,11 @@ int main(void) {
     modbus_data_t last_data = {0};
     bool last_data_valid = false;
     uint32_t last_total_logs = 0;
+
+    // Variáveis para controle de logs de relés (evitar repetições)
+    bool last_compressor_state = false;
+    bool last_heater_state = false;
+    bool relay_states_initialized = false;
 
     while (running) {
         // Verificar botões do teclado
@@ -301,7 +319,7 @@ int main(void) {
 
                     // Reiniciar datalogger para criar novos arquivos
                     datalogger_cleanup(datalogger_ctx);
-                    datalogger_ctx = datalogger_init(device_name);
+                    datalogger_ctx = datalogger_init(device_name, NUM_SENSORS_TO_READ);
                     if (!datalogger_ctx) {
                         fprintf(stderr, "❌ Erro ao reiniciar DataLogger\n");
                         running = false;
@@ -338,7 +356,7 @@ int main(void) {
 
         // printf("Lendo registradores Modbus...\n");
 
-        if (modbus_read_all(modbus_ctx, &data)) {
+        if (modbus_read_all(modbus_ctx, &data, NUM_SENSORS_TO_READ)) {
             // ✅ LEITURA BEM-SUCEDIDA - Processar dados normalmente
 
             // Exibir dados na tela
@@ -376,6 +394,56 @@ int main(void) {
             last_data = data;
             last_data_valid = true;
             last_total_logs = datalogger_ctx->record_counter;
+
+            // 🎛️ ATUALIZAR CONTROLADOR DE TEMPERATURA
+            if (controller_ctx) {
+                // Atualizar controlador com temperaturas CH1 e CH2
+                controller_update(controller_ctx,
+                                data.ch_temp[0],  // CH1 - Controle principal
+                                data.ch_temp[1],  // CH2 - Controle de degelo
+                                data.ch_valid[0], // CH1 válido?
+                                data.ch_valid[1]); // CH2 válido?
+
+                // Aplicar saídas do controlador aos relés
+                bool compressor_should_be_on = controller_should_compressor_be_on(controller_ctx);
+                bool heater_should_be_on = controller_should_heater_be_on(controller_ctx);
+
+                // Compressor - só imprime se mudou de estado (após inicialização)
+                if (relay_states_initialized && compressor_should_be_on != last_compressor_state) {
+                    if (compressor_should_be_on) {
+                        printf("❄️  Compressor LIGADO (GPIO 4)\n");
+                    } else {
+                        printf("❄️  Compressor DESLIGADO (GPIO 4)\n");
+                    }
+                }
+
+                // Aplicar estado ao relé
+                if (compressor_should_be_on) {
+                    relay_compressor_on();
+                } else {
+                    relay_compressor_off();
+                }
+                last_compressor_state = compressor_should_be_on;
+
+                // Resistência - só imprime se mudou de estado (após inicialização)
+                if (relay_states_initialized && heater_should_be_on != last_heater_state) {
+                    if (heater_should_be_on) {
+                        printf("🔥 Resistência LIGADA (GPIO 17)\n");
+                    } else {
+                        printf("🔥 Resistência DESLIGADA (GPIO 17)\n");
+                    }
+                }
+
+                // Aplicar estado ao relé
+                if (heater_should_be_on) {
+                    relay_heater_on();
+                } else {
+                    relay_heater_off();
+                }
+                last_heater_state = heater_should_be_on;
+
+                relay_states_initialized = true;
+            }
 
             // 📺 Atualizar display OLED com a tela atual
             // (botões são verificados no loop de espera e atualizam imediatamente)
@@ -421,11 +489,19 @@ int main(void) {
 
             if (keyboard_inc_is_pressed() && oled_ctx) {
                 oled_increment_setpoint(oled_ctx);
+                // Sincronizar setpoint com o controlador
+                if (controller_ctx) {
+                    controller_set_setpoint(controller_ctx, oled_get_setpoint(oled_ctx));
+                }
                 button_pressed = true;
             }
 
             if (keyboard_dec_is_pressed() && oled_ctx) {
                 oled_decrement_setpoint(oled_ctx);
+                // Sincronizar setpoint com o controlador
+                if (controller_ctx) {
+                    controller_set_setpoint(controller_ctx, oled_get_setpoint(oled_ctx));
+                }
                 button_pressed = true;
             }
 
@@ -455,6 +531,9 @@ int main(void) {
     relay_cleanup();
     if (oled_ctx) {
         oled_cleanup(oled_ctx);
+    }
+    if (controller_ctx) {
+        controller_cleanup(controller_ctx);
     }
     datalogger_cleanup(datalogger_ctx);
     modbus_cleanup(modbus_ctx);

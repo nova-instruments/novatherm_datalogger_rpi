@@ -105,10 +105,14 @@ bool modbus_read_register(modbus_context_t* ctx, uint16_t address, uint16_t* val
     return true;
 }
 
-bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data) {
+bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data, int num_channels) {
     if (!ctx || !data) {
         return false;
     }
+
+    // Validar número de canais (1 a 7)
+    if (num_channels < 1) num_channels = 1;
+    if (num_channels > MODBUS_NUM_CHANNELS) num_channels = MODBUS_NUM_CHANNELS;
 
     // Inicializar estrutura
     memset(data, 0, sizeof(modbus_data_t));
@@ -121,8 +125,8 @@ bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data) {
 
     bool at_least_one_success = false;
 
-    // Ler todos os 7 canais
-    for (int i = 0; i < MODBUS_NUM_CHANNELS; i++) {
+    // Ler apenas os canais configurados
+    for (int i = 0; i < num_channels; i++) {
         data->ch_valid[i] = modbus_read_register(ctx, channel_addresses[i], &data->ch_raw[i]);
 
         if (data->ch_valid[i]) {

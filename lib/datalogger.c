@@ -88,21 +88,26 @@ bool datalogger_get_rtc_time(struct tm* tm_info) {
     return false;
 }
 
-datalogger_context_t* datalogger_init(const char* device_name) {
+datalogger_context_t* datalogger_init(const char* device_name, int num_channels) {
     if (!device_name || strlen(device_name) == 0) {
         fprintf(stderr, "Erro: Nome do dispositivo não pode ser vazio\n");
         return NULL;
     }
-    
+
+    // Validar número de canais
+    if (num_channels < 1) num_channels = 1;
+    if (num_channels > MODBUS_NUM_CHANNELS) num_channels = MODBUS_NUM_CHANNELS;
+
     datalogger_context_t* ctx = malloc(sizeof(datalogger_context_t));
     if (!ctx) {
         fprintf(stderr, "Erro: Falha ao alocar memória para contexto do datalogger\n");
         return NULL;
     }
-    
+
     // Inicializar estrutura
     memset(ctx, 0, sizeof(datalogger_context_t));
     strncpy(ctx->device_name, device_name, sizeof(ctx->device_name) - 1);
+    ctx->num_channels = num_channels;
     ctx->initialized = false;
     ctx->log_file = NULL;
     ctx->db = NULL;
@@ -192,9 +197,15 @@ void datalogger_cleanup(datalogger_context_t* ctx) {
 bool datalogger_create_header(datalogger_context_t* ctx) {
     if (!ctx || !ctx->log_file) return false;
 
-    // Escrever cabeçalho no formato NT18B07 (7 canais)
+    // Escrever cabeçalho no formato NT18B07 (dinâmico baseado em num_channels)
     fprintf(ctx->log_file, "NAME: %s\n", ctx->device_name);
-    fprintf(ctx->log_file, "R;Data Hora;CH1;CH2;CH3;CH4;CH5;CH6;CH7\n");
+    fprintf(ctx->log_file, "R;Data Hora");
+
+    // Adicionar colunas de canais dinamicamente
+    for (int i = 0; i < ctx->num_channels; i++) {
+        fprintf(ctx->log_file, ";CH%d", i + 1);
+    }
+    fprintf(ctx->log_file, "\n");
 
     fflush(ctx->log_file);
     return true;
@@ -233,11 +244,11 @@ bool datalogger_write_record(datalogger_context_t* ctx, const datalogger_record_
     char datetime_str[64];
     strftime(datetime_str, sizeof(datetime_str), "%d/%m/%Y %H:%M:%S", &record->timestamp);
 
-    // Escrever registro no formato: R;Data Hora;CH1;CH2;CH3;CH4;CH5;CH6;CH7
+    // Escrever registro no formato: R;Data Hora;CH1;CH2;...;CHn (dinâmico)
     fprintf(ctx->log_file, "%u;%s", record->record_number, datetime_str);
 
-    // Escrever temperaturas dos 7 canais
-    for (int i = 0; i < MODBUS_NUM_CHANNELS; i++) {
+    // Escrever temperaturas apenas dos canais configurados
+    for (int i = 0; i < ctx->num_channels; i++) {
         fprintf(ctx->log_file, ";");
 
         if (record->ch_valid[i]) {
@@ -362,19 +373,21 @@ bool datalogger_create_tables(datalogger_context_t* ctx) {
 
     char* err_msg = NULL;
 
-    // Criar tabela principal DataGrpData (com 7 canais de temperatura do NT18B07)
-    const char* create_data_table =
+    // Criar tabela principal DataGrpData (dinâmica baseada em num_channels)
+    char create_data_table[1024];
+    snprintf(create_data_table, sizeof(create_data_table),
         "CREATE TABLE IF NOT EXISTS DataGrpData ("
         "IndexID INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "CollectTime INTEGER NOT NULL,"
-        "CH1 REAL NOT NULL,"
-        "CH2 REAL NOT NULL,"
-        "CH3 REAL NOT NULL,"
-        "CH4 REAL NOT NULL,"
-        "CH5 REAL NOT NULL,"
-        "CH6 REAL NOT NULL,"
-        "CH7 REAL NOT NULL"
-        ");";
+        "CollectTime INTEGER NOT NULL");
+
+    // Adicionar colunas de canais dinamicamente
+    for (int i = 0; i < ctx->num_channels; i++) {
+        char ch_column[64];
+        snprintf(ch_column, sizeof(ch_column), ",CH%d REAL NOT NULL", i + 1);
+        strncat(create_data_table, ch_column, sizeof(create_data_table) - strlen(create_data_table) - 1);
+    }
+
+    strncat(create_data_table, ");", sizeof(create_data_table) - strlen(create_data_table) - 1);
 
     int rc = sqlite3_exec(ctx->db, create_data_table, NULL, NULL, &err_msg);
     if (rc != SQLITE_OK) {
@@ -459,9 +472,19 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
                                 const datalogger_db_record_t* db_record) {
     if (!ctx || !ctx->db || !db_record) return false;
 
-    const char* sql =
-        "INSERT INTO DataGrpData (CollectTime, CH1, CH2, CH3, CH4, CH5, CH6, CH7) "
-        "VALUES (?, ROUND(?, 1), ROUND(?, 1), ROUND(?, 1), ROUND(?, 1), ROUND(?, 1), ROUND(?, 1), ROUND(?, 1));";
+    // Construir SQL dinamicamente baseado em num_channels
+    char sql[512];
+    char columns[256] = "CollectTime";
+    char values[256] = "?";
+
+    for (int i = 0; i < ctx->num_channels; i++) {
+        char ch_col[16];
+        snprintf(ch_col, sizeof(ch_col), ",CH%d", i + 1);
+        strncat(columns, ch_col, sizeof(columns) - strlen(columns) - 1);
+        strncat(values, ",ROUND(?, 1)", sizeof(values) - strlen(values) - 1);
+    }
+
+    snprintf(sql, sizeof(sql), "INSERT INTO DataGrpData (%s) VALUES (%s);", columns, values);
 
     sqlite3_stmt* stmt;
     int rc = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
@@ -470,15 +493,17 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
         return false;
     }
 
-    // Bind dos parâmetros
+    // Bind dos parâmetros dinamicamente
     sqlite3_bind_int64(stmt, 1, db_record->CollectTime);
-    sqlite3_bind_double(stmt, 2, db_record->CH1);
-    sqlite3_bind_double(stmt, 3, db_record->CH2);
-    sqlite3_bind_double(stmt, 4, db_record->CH3);
-    sqlite3_bind_double(stmt, 5, db_record->CH4);
-    sqlite3_bind_double(stmt, 6, db_record->CH5);
-    sqlite3_bind_double(stmt, 7, db_record->CH6);
-    sqlite3_bind_double(stmt, 8, db_record->CH7);
+
+    float* ch_fields[MODBUS_NUM_CHANNELS] = {
+        &db_record->CH1, &db_record->CH2, &db_record->CH3, &db_record->CH4,
+        &db_record->CH5, &db_record->CH6, &db_record->CH7
+    };
+
+    for (int i = 0; i < ctx->num_channels; i++) {
+        sqlite3_bind_double(stmt, i + 2, *ch_fields[i]);
+    }
 
     // Executar
     rc = sqlite3_step(stmt);

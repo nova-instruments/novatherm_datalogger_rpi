@@ -60,6 +60,7 @@ add_library(usb_manager STATIC lib/usb_manager.c)
 add_library(relay_control STATIC lib/relay_control.c)
 add_library(keyboard STATIC lib/keyboard.c)
 add_library(oled_ssd1306 STATIC lib/oled_ssd1306.c)
+add_library(controller STATIC lib/controller.c)
 
 # Executável principal
 add_executable(app_armv7 src/main.c)
@@ -75,6 +76,7 @@ target_link_libraries(app_armv7
     relay_control
     keyboard
     oled_ssd1306
+    controller
     # Usar bibliotecas estáticas (.a) ao invés de compartilhadas (.so)
     ${LIBMODBUS_DIR}/lib/libmodbus.a
     ${LIBGPIOD_DIR}/lib/libgpiod.a

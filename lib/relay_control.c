@@ -273,7 +273,6 @@ int relay_compressor_on(void) {
         return -1;
     }
 
-    printf("❄️  Compressor LIGADO (GPIO %d)\n", RELAY_COMPRESSOR_GPIO);
     return 0;
 }
 
@@ -292,7 +291,6 @@ int relay_compressor_off(void) {
         return -1;
     }
 
-    printf("❄️  Compressor DESLIGADO (GPIO %d)\n", RELAY_COMPRESSOR_GPIO);
     return 0;
 }
 
@@ -311,7 +309,6 @@ int relay_heater_on(void) {
         return -1;
     }
 
-    printf("🔥 Resistência LIGADA (GPIO %d)\n", RELAY_HEATER_GPIO);
     return 0;
 }
 
@@ -330,7 +327,6 @@ int relay_heater_off(void) {
         return -1;
     }
 
-    printf("🔥 Resistência DESLIGADA (GPIO %d)\n", RELAY_HEATER_GPIO);
     return 0;
 }
 

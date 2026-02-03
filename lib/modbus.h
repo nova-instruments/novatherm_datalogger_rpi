@@ -67,9 +67,10 @@ void modbus_cleanup(modbus_context_t* ctx);
  * @brief Lê todos os registradores configurados
  * @param ctx Contexto Modbus
  * @param data Estrutura para armazenar os dados lidos
+ * @param num_channels Número de canais a serem lidos (1 a 7)
  * @return true se pelo menos uma leitura foi bem-sucedida, false caso contrário
  */
-bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data);
+bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data, int num_channels);
 
 /**
  * @brief Lê um registrador específico

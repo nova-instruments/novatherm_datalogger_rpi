@@ -523,7 +523,7 @@ void oled_display_setpoint_screen(oled_context_t* ctx) {
     oled_clear(ctx);
 
     // Título
-    oled_draw_string(ctx, 20, 0, "AJUSTE SETPOINT");
+    oled_draw_string(ctx, 40, 0, "SETPOINT");
     oled_draw_hline(ctx, 0, 10, 128);
 
     // Valor do setpoint (grande, centralizado)

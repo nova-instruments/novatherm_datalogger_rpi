@@ -25,6 +25,7 @@ typedef struct {
     char log_file_path[DATALOGGER_MAX_PATH];  // Caminho completo do arquivo de log TXT
     char db_file_path[DATALOGGER_MAX_PATH];   // Caminho completo do arquivo de banco SQLite
     uint32_t record_counter;    // Contador de registros
+    int num_channels;           // Número de canais a serem gravados (1 a 7)
     bool initialized;           // Flag de inicialização
     FILE* log_file;            // Handle do arquivo de log TXT
     sqlite3* db;               // Handle do banco de dados SQLite
@@ -69,9 +70,10 @@ typedef struct {
 /**
  * @brief Inicializa o sistema de datalogger
  * @param device_name Nome do dispositivo (ex: "NI00002")
+ * @param num_channels Número de canais a serem gravados (1 a 7)
  * @return Ponteiro para contexto do datalogger ou NULL em caso de erro
  */
-datalogger_context_t* datalogger_init(const char* device_name);
+datalogger_context_t* datalogger_init(const char* device_name, int num_channels);
 
 /**
  * @brief Finaliza o sistema de datalogger e libera recursos
