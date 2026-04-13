@@ -190,8 +190,8 @@ fi
 # Verificar se as bibliotecas foram compiladas corretamente
 log_info "Verificando bibliotecas compiladas..."
 
-LIBMODBUS_PATH="$DEPS_DIR/libmodbus/install/lib/libmodbus.so"
-LIBGPIOD_PATH="$DEPS_DIR/libgpiod/install/lib/libgpiod.so"
+LIBMODBUS_PATH="$DEPS_DIR/libmodbus/install/lib/libmodbus.a"
+LIBGPIOD_PATH="$DEPS_DIR/libgpiod/install/lib/libgpiod.a"
 LIBUDEV_PATH="$DEPS_DIR/eudev/install/lib/libudev.a"
 
 if [ -f "$LIBMODBUS_PATH" ]; then
@@ -219,7 +219,7 @@ else
 fi
 
 # Verificar SQLite3
-SQLITE3_PATH="$PROJECT_ROOT/deps/sqlite3/install/lib/libsqlite3.so"
+SQLITE3_PATH="$PROJECT_ROOT/deps/sqlite3/install/lib/libsqlite3.a"
 if [ -f "$SQLITE3_PATH" ]; then
     log_success "SQLite3 encontrado: $SQLITE3_PATH"
     file "$SQLITE3_PATH" | grep -q "ARM" && log_success "SQLite3 é ARM" || log_warning "SQLite3 pode não ser ARM"

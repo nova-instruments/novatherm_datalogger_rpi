@@ -38,6 +38,8 @@ typedef struct {
     float ch_temp[MODBUS_NUM_CHANNELS];  // Temperaturas dos 7 canais (°C)
     bool ch_valid[MODBUS_NUM_CHANNELS];  // Flags de validade de cada canal
     bool ch_error[MODBUS_NUM_CHANNELS];  // Flags de erro de sensor (desconectado)
+    bool compressor_on;         // Status do compressor (true = ligado)
+    bool heater_on;             // Status da resistência (true = ligado)
 } datalogger_record_t;
 
 // Estrutura para registro no banco SQLite - NT18B07
@@ -51,6 +53,8 @@ typedef struct {
     float CH5;                 // Temperatura canal 5 em °C (1 casa decimal)
     float CH6;                 // Temperatura canal 6 em °C (1 casa decimal)
     float CH7;                 // Temperatura canal 7 em °C (1 casa decimal)
+    int Compressor;            // Status do compressor (0 = desligado, 1 = ligado)
+    int Heater;                // Status da resistência (0 = desligado, 1 = ligado)
 } datalogger_db_record_t;
 
 // Estrutura para informações do banco (tabela DBInfo)
@@ -85,9 +89,12 @@ void datalogger_cleanup(datalogger_context_t* ctx);
  * @brief Registra dados no arquivo de log
  * @param ctx Contexto do datalogger
  * @param modbus_data Dados lidos do Modbus
+ * @param compressor_on Status do compressor (true = ligado)
+ * @param heater_on Status da resistência (true = ligado)
  * @return true se registro foi bem-sucedido, false caso contrário
  */
-bool datalogger_log_data(datalogger_context_t* ctx, const modbus_data_t* modbus_data);
+bool datalogger_log_data(datalogger_context_t* ctx, const modbus_data_t* modbus_data,
+                        bool compressor_on, bool heater_on);
 
 /**
  * @brief Obtém data e hora do RTC do sistema

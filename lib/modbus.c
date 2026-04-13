@@ -105,6 +105,24 @@ bool modbus_read_register(modbus_context_t* ctx, uint16_t address, uint16_t* val
     return true;
 }
 
+/**
+ * @brief Aplica correção polinomial de 2º grau nos sensores
+ * Equação: y = -0,0049x² + 1,3384x - 5,3759 (R² = 0,9986)
+ * @param temp_raw Temperatura bruta lida do sensor (°C)
+ * @return Temperatura corrigida (°C)
+ */
+static float apply_polynomial_correction(float temp_raw) {
+    // Coeficientes da equação polinomial de 2º grau
+    const float a = -0.0049f;
+    const float b = 1.3384f;
+    const float c = -5.3759f;
+
+    // y = ax² + bx + c
+    float temp_corrected = (a * temp_raw * temp_raw) + (b * temp_raw) + c;
+
+    return temp_corrected;
+}
+
 bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data, int num_channels) {
     if (!ctx || !data) {
         return false;
@@ -143,6 +161,13 @@ bool modbus_read_all(modbus_context_t* ctx, modbus_data_t* data, int num_channel
                 // Valores negativos: subtrair 65536 e dividir por 10
                 int16_t temp_raw = (int16_t)data->ch_raw[i];
                 data->ch_temp[i] = temp_raw / 10.0f;
+
+                // 🔧 APLICAR CORREÇÃO POLINOMIAL NOS CANAIS 1 E 2 (CH1 e CH2)
+                if (i == 0 || i == 1) {  // Canal 1 e 2 (índices 0 e 1)
+                    float temp_original = data->ch_temp[i];
+                    data->ch_temp[i] = apply_polynomial_correction(temp_original);
+                    // printf("🔧 CH%d Correção: %.1f°C → %.1f°C\n", i+1, temp_original, data->ch_temp[i]);
+                }
             }
         }
 

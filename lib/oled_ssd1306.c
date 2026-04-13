@@ -571,8 +571,12 @@ void oled_display_diagnostics_screen(oled_context_t* ctx, bool lamp_on, bool dia
  */
 void oled_update_current_screen(oled_context_t* ctx, const char* device_name,
                                 const modbus_data_t* data, uint32_t record_count,
-                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on) {
+                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on,
+                                bool door_open) {
     if (!ctx) return;
+
+    // Parâmetro door_open não usado no OLED (apenas no LCD)
+    (void)door_open;
 
     switch (ctx->current_screen) {
         case SCREEN_TEMPERATURES:

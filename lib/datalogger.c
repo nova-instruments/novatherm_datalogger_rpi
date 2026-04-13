@@ -205,7 +205,9 @@ bool datalogger_create_header(datalogger_context_t* ctx) {
     for (int i = 0; i < ctx->num_channels; i++) {
         fprintf(ctx->log_file, ";CH%d", i + 1);
     }
-    fprintf(ctx->log_file, "\n");
+
+    // Adicionar colunas de status dos relés
+    fprintf(ctx->log_file, ";Compressor;Resistencia\n");
 
     fflush(ctx->log_file);
     return true;
@@ -262,24 +264,32 @@ bool datalogger_write_record(datalogger_context_t* ctx, const datalogger_record_
         }
     }
 
+    // Escrever status dos relés (0 = desligado, 1 = ligado)
+    fprintf(ctx->log_file, ";%d;%d", record->compressor_on ? 1 : 0, record->heater_on ? 1 : 0);
+
     fprintf(ctx->log_file, "\n");
     fflush(ctx->log_file);
     return true;
 }
 
-bool datalogger_log_data(datalogger_context_t* ctx, const modbus_data_t* modbus_data) {
+bool datalogger_log_data(datalogger_context_t* ctx, const modbus_data_t* modbus_data,
+                        bool compressor_on, bool heater_on) {
     if (!ctx || !ctx->initialized || !modbus_data) return false;
-    
+
     // Incrementar contador
     ctx->record_counter++;
-    
+
     // Converter dados
     datalogger_record_t record;
     if (!datalogger_convert_modbus_data(modbus_data, &record, ctx->record_counter)) {
         fprintf(stderr, "Erro ao converter dados Modbus para registro\n");
         return false;
     }
-    
+
+    // Adicionar status dos relés
+    record.compressor_on = compressor_on;
+    record.heater_on = heater_on;
+
     // Escrever registro no arquivo TXT
     if (!datalogger_write_record(ctx, &record)) {
         fprintf(stderr, "Erro ao escrever registro no arquivo de log TXT\n");
@@ -387,6 +397,10 @@ bool datalogger_create_tables(datalogger_context_t* ctx) {
         strncat(create_data_table, ch_column, sizeof(create_data_table) - strlen(create_data_table) - 1);
     }
 
+    // Adicionar colunas de status dos relés
+    strncat(create_data_table, ",Compressor INTEGER NOT NULL", sizeof(create_data_table) - strlen(create_data_table) - 1);
+    strncat(create_data_table, ",Heater INTEGER NOT NULL", sizeof(create_data_table) - strlen(create_data_table) - 1);
+
     strncat(create_data_table, ");", sizeof(create_data_table) - strlen(create_data_table) - 1);
 
     int rc = sqlite3_exec(ctx->db, create_data_table, NULL, NULL, &err_msg);
@@ -462,6 +476,10 @@ bool datalogger_convert_to_db_record(const datalogger_record_t* txt_record,
         }
     }
 
+    // Converter status dos relés
+    db_record->Compressor = txt_record->compressor_on ? 1 : 0;
+    db_record->Heater = txt_record->heater_on ? 1 : 0;
+
     return true;
 }
 
@@ -484,6 +502,10 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
         strncat(values, ",ROUND(?, 1)", sizeof(values) - strlen(values) - 1);
     }
 
+    // Adicionar colunas de status dos relés
+    strncat(columns, ",Compressor,Heater", sizeof(columns) - strlen(columns) - 1);
+    strncat(values, ",?,?", sizeof(values) - strlen(values) - 1);
+
     snprintf(sql, sizeof(sql), "INSERT INTO DataGrpData (%s) VALUES (%s);", columns, values);
 
     sqlite3_stmt* stmt;
@@ -496,14 +518,20 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
     // Bind dos parâmetros dinamicamente
     sqlite3_bind_int64(stmt, 1, db_record->CollectTime);
 
-    float* ch_fields[MODBUS_NUM_CHANNELS] = {
+    // Array de ponteiros para os campos de temperatura (todos os 7 canais)
+    const float* ch_fields[MODBUS_NUM_CHANNELS] = {
         &db_record->CH1, &db_record->CH2, &db_record->CH3, &db_record->CH4,
         &db_record->CH5, &db_record->CH6, &db_record->CH7
     };
 
+    // Fazer bind apenas dos canais configurados
     for (int i = 0; i < ctx->num_channels; i++) {
         sqlite3_bind_double(stmt, i + 2, *ch_fields[i]);
     }
+
+    // Bind dos status dos relés
+    sqlite3_bind_int(stmt, ctx->num_channels + 2, db_record->Compressor);
+    sqlite3_bind_int(stmt, ctx->num_channels + 3, db_record->Heater);
 
     // Executar
     rc = sqlite3_step(stmt);

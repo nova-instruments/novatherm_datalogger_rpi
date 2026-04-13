@@ -211,10 +211,12 @@ void oled_display_diagnostics_screen(oled_context_t* ctx, bool lamp_on, bool dia
  * @param dialer_on Estado do relé da discadora
  * @param compressor_on Estado do relé do compressor
  * @param heater_on Estado do relé da resistência
+ * @param door_open Estado da porta (true = aberta, false = fechada)
  */
 void oled_update_current_screen(oled_context_t* ctx, const char* device_name,
                                 const modbus_data_t* data, uint32_t record_count,
-                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on);
+                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on,
+                                bool door_open);
 
 #ifdef __cplusplus
 }

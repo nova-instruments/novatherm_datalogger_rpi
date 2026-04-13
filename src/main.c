@@ -25,18 +25,19 @@
 #include "usb_manager.h"
 #include "relay_control.h"
 #include "keyboard.h"
-#include "oled_ssd1306.h"
+#include "input.h"
+#include "display.h"
 #include "controller.h"
 
 // Configurações da aplicação
-#define LOOP_INTERVAL_SECONDS 300  // 5 minutos = 300 segundos
+#define LOOP_INTERVAL_SECONDS 60  // 5 minutos = 300 segundos
 #define DEFAULT_DEVICE_NAME "NI00002"  // Nome padrão do dispositivo
 #define CONFIG_FILE "/boot/firmware/config.txt"  // Arquivo de configuração do sistema
 
 // ⚙️ CONFIGURAÇÃO: Número de sensores NTC a serem lidos do NT18B07
 // Valores válidos: 1 a 7 (NT18B07 suporta até 7 canais)
 // Reduzir este valor acelera a leitura Modbus (cada canal leva ~50-100ms)
-static const int NUM_SENSORS_TO_READ = 4;
+static const int NUM_SENSORS_TO_READ = 2;
 
 // ⚙️ CONFIGURAÇÃO: Alarme de falta de comunicação Modbus
 // true  = Buzzer emite alarme quando há erro de comunicação com COEL
@@ -225,14 +226,21 @@ int main(void) {
         printf("✅ Teclado ativo\n");
     }
 
-    // Inicializar display OLED
-    oled_context_t* oled_ctx = oled_init();
-    if (!oled_ctx) {
-        printf("⚠️  Aviso: Falha ao inicializar display OLED (continuando sem display)\n");
+    // Inicializar sensor de porta (GPIO 10)
+    if (input_init() != 0) {
+        printf("⚠️  Aviso: Falha ao inicializar sensor de porta (continuando sem esta funcionalidade)\n");
     } else {
-        printf("✅ Display OLED ativo\n");
+        printf("✅ Sensor de porta ativo\n");
+    }
+
+    // Inicializar display
+    display_context_t* display_ctx = display_init();
+    if (!display_ctx) {
+        printf("⚠️  Aviso: Falha ao inicializar display (continuando sem display)\n");
+    } else {
+        printf("✅ Display ativo\n");
         // Exibir tela de splash
-        oled_display_splash(oled_ctx, device_name);
+        display_splash(display_ctx, device_name);
         sleep(2);  // Mostrar splash por 2 segundos
     }
 
@@ -251,7 +259,7 @@ int main(void) {
     }
 
     // 🎛️ Inicializar controlador de temperatura
-    float initial_setpoint = oled_ctx ? oled_get_setpoint(oled_ctx) : 5.0f;
+    float initial_setpoint = display_ctx ? display_get_setpoint(display_ctx) : 5.0f;
     controller_context_t* controller_ctx = controller_init(initial_setpoint);
     if (!controller_ctx) {
         fprintf(stderr, "❌ Erro ao inicializar controlador de temperatura\n");
@@ -266,12 +274,12 @@ int main(void) {
     printf("🔘 Pressione o botão de reset (GPIO5 → GND) para apagar todos os logs\n\n");
 
     // Loop principal de aquisição e logging
-    // Estado anterior da porta (inicializar com valor inválido)
+    // Estado anterior da porta (para detecção de mudança)
     bool previous_door_state_valid = false;
-    uint16_t previous_door_state = 0;
+    bool previous_door_state = false;
     uint32_t door_change_logs = 0;
 
-    // Estado anterior do alarme (inicializar com valor inválido)
+    // Estado anterior do alarme (código legado - não usado no NT18B07)
     bool previous_alarm_state_valid = false;
     uint16_t previous_alarm_state = 0;
     uint32_t alarm_change_logs = 0;
@@ -347,8 +355,6 @@ int main(void) {
             }
         }
 
-
-
         modbus_data_t data;
         bool should_log = false;
         bool is_door_change = false;
@@ -362,20 +368,38 @@ int main(void) {
             // Exibir dados na tela
             // modbus_print_data(&data);
 
-            // NT18B07: Não há porta nem alarme, apenas 7 canais de temperatura
-            // Log periódico será feito a cada 5 minutos
+            // 🚪 VERIFICAR MUDANÇA DE ESTADO DA PORTA (GPIO 10)
+            bool current_door_state = false;
+            if (input_door_state_changed(&current_door_state)) {
+                // Houve mudança no estado da porta
+                is_door_change = true;
+                should_log = true;  // Forçar log imediato
+                printf("🚪 Porta %s - registrando no log imediatamente\n",
+                       current_door_state ? "ABERTA" : "FECHADA");
+                previous_door_state = current_door_state;
+                previous_door_state_valid = true;
+            } else if (!previous_door_state_valid) {
+                // Primeira leitura - inicializar estado
+                current_door_state = input_door_is_open();
+                previous_door_state = current_door_state;
+                previous_door_state_valid = true;
+            }
 
-            // Verificar se é hora do log periódico (5 minutos)
+            // Verificar se é hora do log periódico (60 segundos)
             time_t current_time = time(NULL);
             if (!should_log && (current_time - last_periodic_log) >= LOOP_INTERVAL_SECONDS) {
                 should_log = true;
                 last_periodic_log = current_time;
-                // printf("⏰ Log periódico (5 minutos)\n");
+                // printf("⏰ Log periódico (60 segundos)\n");
             }
 
             // ✅ GRAVAR NO DATALOGGER (apenas quando leitura foi bem-sucedida)
             if (should_log) {
-                if (datalogger_log_data(datalogger_ctx, &data)) {
+                // Obter status dos relés do controlador
+                bool compressor_status = controller_should_compressor_be_on(controller_ctx);
+                bool heater_status = controller_should_heater_be_on(controller_ctx);
+
+                if (datalogger_log_data(datalogger_ctx, &data, compressor_status, heater_status)) {
                     if (is_door_change) {
                         // printf("✅ Mudança de porta registrada imediatamente no log\n");
                         door_change_logs++;
@@ -445,12 +469,16 @@ int main(void) {
                 relay_states_initialized = true;
             }
 
-            // 📺 Atualizar display OLED com a tela atual
+            // 📺 Atualizar display com a tela atual
             // (botões são verificados no loop de espera e atualizam imediatamente)
-            if (oled_ctx) {
-                oled_update_current_screen(oled_ctx, device_name, &data, last_total_logs,
-                                          relay_lamp_is_on(), relay_dialer_is_on(),
-                                          relay_compressor_is_on(), relay_heater_is_on());
+            if (display_ctx) {
+                // Obter estado atual da porta para exibir no display
+                bool door_state_for_display = input_door_is_open();
+
+                display_update_current_screen(display_ctx, device_name, &data, last_total_logs,
+                                             relay_lamp_is_on(), relay_dialer_is_on(),
+                                             relay_compressor_is_on(), relay_heater_is_on(),
+                                             door_state_for_display);
             }
 
         } else {
@@ -463,10 +491,7 @@ int main(void) {
                 buzzer_signal_modbus_error();
             }
 
-            // 📺 Exibir erro no display OLED
-            if (oled_ctx) {
-                oled_display_error(oled_ctx, "Erro Modbus");
-            }
+            // 📺 Display continua mostrando última tela válida em caso de erro
         }
 
         // Aguardar próxima leitura com verificação contínua de botões
@@ -477,39 +502,43 @@ int main(void) {
             // Verificar botões durante a espera para resposta instantânea
             bool button_pressed = false;
 
-            if (keyboard_next_is_pressed() && oled_ctx) {
-                oled_next_screen(oled_ctx);
+            if (keyboard_next_is_pressed() && display_ctx) {
+                display_next_screen(display_ctx);
                 button_pressed = true;
             }
 
-            if (keyboard_before_is_pressed() && oled_ctx) {
-                oled_previous_screen(oled_ctx);
+            if (keyboard_before_is_pressed() && display_ctx) {
+                display_previous_screen(display_ctx);
                 button_pressed = true;
             }
 
-            if (keyboard_inc_is_pressed() && oled_ctx) {
-                oled_increment_setpoint(oled_ctx);
+            if (keyboard_inc_is_pressed() && display_ctx) {
+                display_increment_setpoint(display_ctx);
                 // Sincronizar setpoint com o controlador
                 if (controller_ctx) {
-                    controller_set_setpoint(controller_ctx, oled_get_setpoint(oled_ctx));
+                    controller_set_setpoint(controller_ctx, display_get_setpoint(display_ctx));
                 }
                 button_pressed = true;
             }
 
-            if (keyboard_dec_is_pressed() && oled_ctx) {
-                oled_decrement_setpoint(oled_ctx);
+            if (keyboard_dec_is_pressed() && display_ctx) {
+                display_decrement_setpoint(display_ctx);
                 // Sincronizar setpoint com o controlador
                 if (controller_ctx) {
-                    controller_set_setpoint(controller_ctx, oled_get_setpoint(oled_ctx));
+                    controller_set_setpoint(controller_ctx, display_get_setpoint(display_ctx));
                 }
                 button_pressed = true;
             }
 
             // Atualizar display imediatamente se botão foi pressionado
-            if (button_pressed && oled_ctx) {
-                oled_update_current_screen(oled_ctx, device_name, &last_data, last_total_logs,
-                                          relay_lamp_is_on(), relay_dialer_is_on(),
-                                          relay_compressor_is_on(), relay_heater_is_on());
+            if (button_pressed && display_ctx) {
+                // Obter estado atual da porta para exibir no display
+                bool door_state_for_display = input_door_is_open();
+
+                display_update_current_screen(display_ctx, device_name, &last_data, last_total_logs,
+                                             relay_lamp_is_on(), relay_dialer_is_on(),
+                                             relay_compressor_is_on(), relay_heater_is_on(),
+                                             door_state_for_display);
             }
         }
     }
@@ -528,9 +557,10 @@ int main(void) {
 
     // Limpar recursos
     keyboard_cleanup();
+    input_cleanup();
     relay_cleanup();
-    if (oled_ctx) {
-        oled_cleanup(oled_ctx);
+    if (display_ctx) {
+        display_cleanup(display_ctx);
     }
     if (controller_ctx) {
         controller_cleanup(controller_ctx);

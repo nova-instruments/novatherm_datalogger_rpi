@@ -75,9 +75,10 @@ fi
 log_info "Verificando bibliotecas ARM compiladas..."
 
 DEPS_DIR="$PROJECT_ROOT/deps"
-LIBMODBUS_PATH="$DEPS_DIR/libmodbus/install/lib/libmodbus.so"
-LIBGPIOD_PATH="$DEPS_DIR/libgpiod/install/lib/libgpiod.so"
+LIBMODBUS_PATH="$DEPS_DIR/libmodbus/install/lib/libmodbus.a"
+LIBGPIOD_PATH="$DEPS_DIR/libgpiod/install/lib/libgpiod.a"
 LIBUDEV_PATH="$DEPS_DIR/eudev/install/lib/libudev.a"
+SQLITE3_PATH="$DEPS_DIR/sqlite3/install/lib/libsqlite3.a"
 
 if [ -f "$LIBMODBUS_PATH" ]; then
     log_success "libmodbus ARM encontrada: $LIBMODBUS_PATH"
@@ -101,6 +102,14 @@ if [ -f "$LIBUDEV_PATH" ]; then
 else
     log_error "libudev ARM não encontrada!"
     log_error "Execute: ./scripts/build_libudev_arm.sh"
+fi
+
+if [ -f "$SQLITE3_PATH" ]; then
+    log_success "sqlite3 ARM encontrada: $SQLITE3_PATH"
+    file "$SQLITE3_PATH" | grep -q "ARM" && log_success "  ✓ Arquitetura ARM confirmada" || log_warning "  ⚠ Pode não ser ARM"
+else
+    log_error "sqlite3 ARM não encontrada!"
+    log_error "Execute: ./scripts/build_sqlite3_arm.sh"
 fi
 
 # Verificar arquivo de configuração
@@ -145,18 +154,18 @@ if [ -d "$BUILD_DIR" ]; then
     log_success "Diretório de build encontrado: $BUILD_DIR"
     
     # Verificar se há executável
-    if [ -f "$BUILD_DIR/bin/app" ]; then
-        log_success "Executável encontrado: $BUILD_DIR/bin/app"
+    if [ -f "$BUILD_DIR/bin/app_armv7" ]; then
+        log_success "Executável encontrado: $BUILD_DIR/bin/app_armv7"
 
         # Verificar arquitetura
-        if file "$BUILD_DIR/bin/app" | grep -q "ARM"; then
+        if file "$BUILD_DIR/bin/app_armv7" | grep -q "ARM"; then
             log_success "  ✓ Executável é ARM"
         else
             log_warning "  ⚠ Executável pode não ser ARM"
         fi
 
         # Mostrar tamanho
-        SIZE=$(ls -lh "$BUILD_DIR/bin/app" | awk '{print $5}')
+        SIZE=$(ls -lh "$BUILD_DIR/bin/app_armv7" | awk '{print $5}')
         log_info "  Tamanho: $SIZE"
     else
         log_warning "Executável não encontrado - execute make para compilar"
@@ -179,6 +188,7 @@ if ! command_exists cmake; then ((ERRORS++)); fi
 if [ ! -f "$LIBMODBUS_PATH" ]; then ((ERRORS++)); fi
 if [ ! -f "$LIBGPIOD_PATH" ]; then ((ERRORS++)); fi
 if [ ! -f "$LIBUDEV_PATH" ]; then ((ERRORS++)); fi
+if [ ! -f "$SQLITE3_PATH" ]; then ((ERRORS++)); fi
 if [ ! -f "$CMAKE_FILE" ]; then ((ERRORS++)); fi
 if [ ! -f "$TOOLCHAIN_FILE" ]; then ((ERRORS++)); fi
 

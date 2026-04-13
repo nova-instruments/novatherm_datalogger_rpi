@@ -1,208 +1,142 @@
-# Makefile para o projeto Modbus Reader
-# Facilita o uso dos scripts de build e deploy
+# Makefile para o projeto NovaTherm DataLogger (ARMv7 only)
 
-.PHONY: help setup build clean check deploy test armv6 setup-armv6 build-armv6 clean-armv6 deploy-armv6 info-armv6
+.PHONY: help setup check configure-lcd configure-lvgl configure-st7567 build build-lcd build-lvgl build-st7567 deploy deploy-lcd deploy-lvgl deploy-st7567 test info clean rebuild
 
-# Configurações
+# Configuracoes
 BUILD_DIR = build-rpi
-BUILD_DIR_ARMV6 = build-rpi1
+APP_NAME = app_armv7
 RPI_IP ?= 192.168.3.22
 RPI_USER ?= nova
 
 help:
-	@echo "=== Modbus Reader - Comandos Disponíveis ==="
+	@echo "=== NovaTherm DataLogger - Comandos Disponiveis ==="
 	@echo ""
-	@echo "📋 Configuração:"
-	@echo "  make setup     - Configura ambiente de cross-compilation"
-	@echo "  make check     - Verifica se ambiente está configurado"
+	@echo "Configuracao de ambiente:"
+	@echo "  make setup           - Instala/compila deps ARMv7 e configura CMake (LCD padrao)"
+	@echo "  make check           - Verifica ambiente"
 	@echo ""
-	@echo "🔨 Compilação:"
-	@echo "  make build     - Compila o projeto para ARM"
-	@echo "  make clean     - Limpa arquivos de build"
-	@echo "  make rebuild   - Limpa e recompila"
+	@echo "Perfis de display (sempre em $(BUILD_DIR)):"
+	@echo "  make configure-lcd   - LCD 20x4 I2C (padrao)"
+	@echo "  make configure-lvgl  - ILI9341 + LVGL"
+	@echo "  make configure-st7567- ST7567 128x64"
 	@echo ""
-	@echo "🚀 Deploy:"
-	@echo "  make deploy    - Envia para Raspberry Pi (IP=$(RPI_IP), USER=$(RPI_USER))"
-	@echo "  make deploy RPI_IP=<ip> RPI_USER=<user> - Deploy com IP/usuário específicos"
+	@echo "Compilacao:"
+	@echo "  make build           - Compila perfil atualmente configurado em $(BUILD_DIR)"
+	@echo "  make build-lcd       - Reconfigura para LCD e compila"
+	@echo "  make build-lvgl      - Reconfigura para LVGL e compila"
+	@echo "  make build-st7567    - Reconfigura para ST7567 e compila"
 	@echo ""
-	@echo "🧪 Testes:"
-	@echo "  make test      - Executa verificações básicas"
+	@echo "Deploy:"
+	@echo "  make deploy          - Envia $(BUILD_DIR)/bin/$(APP_NAME)"
+	@echo "  make deploy-lcd      - build-lcd + deploy"
+	@echo "  make deploy-lvgl     - build-lvgl + deploy"
+	@echo "  make deploy-st7567   - build-st7567 + deploy"
+	@echo "  make deploy RPI_IP=<ip> RPI_USER=<user>"
 	@echo ""
-	@echo "� ARMv6 (Raspberry Pi 1):"
-	@echo "  make setup-armv6  - Configura ambiente para ARMv6"
-	@echo "  make build-armv6  - Compila para ARMv6 (Raspberry Pi 1)"
-	@echo "  make clean-armv6  - Limpa build ARMv6"
-	@echo "  make deploy-armv6 - Deploy para Raspberry Pi 1"
-	@echo "  make info-armv6   - Informações do build ARMv6"
-	@echo ""
-	@echo "�📖 Informações:"
-	@echo "  make info      - Mostra informações do projeto"
+	@echo "Outros:"
+	@echo "  make info            - Status de deps/binario"
+	@echo "  make clean           - Remove $(BUILD_DIR)"
+	@echo "  make rebuild         - clean + setup + build"
 
 setup:
-	@echo "🔧 Configurando ambiente de cross-compilation..."
+	@echo "Configurando ambiente de cross-compilation ARMv7..."
 	@chmod +x scripts/setup_cross_compilation.sh
 	@./scripts/setup_cross_compilation.sh
+	@$(MAKE) configure-lcd
 
 check:
-	@echo "🔍 Verificando ambiente..."
+	@echo "Verificando ambiente..."
 	@chmod +x scripts/check_cross_compilation.sh
 	@./scripts/check_cross_compilation.sh
 
+configure-lcd:
+	@echo "Configurando CMake para LCD 20x4 em $(BUILD_DIR)..."
+	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
+		-DUSE_LVGL_ILI9341=OFF -DUSE_ST7567=OFF -DUSE_LCD_I2C=ON \
+		-B $(BUILD_DIR) -S .
+
+configure-lvgl:
+	@echo "Configurando CMake para ILI9341 + LVGL em $(BUILD_DIR)..."
+	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
+		-DUSE_LVGL_ILI9341=ON -DUSE_ST7567=OFF -DUSE_LCD_I2C=OFF \
+		-B $(BUILD_DIR) -S .
+
+configure-st7567:
+	@echo "Configurando CMake para ST7567 em $(BUILD_DIR)..."
+	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
+		-DUSE_LVGL_ILI9341=OFF -DUSE_ST7567=ON -DUSE_LCD_I2C=OFF \
+		-B $(BUILD_DIR) -S .
+
 build:
-	@echo "🔨 Compilando projeto..."
+	@echo "Compilando projeto ARMv7 em $(BUILD_DIR)..."
 	@if [ ! -d "$(BUILD_DIR)" ]; then \
-		echo "⚠️  Diretório de build não existe. Execute 'make setup' primeiro."; \
+		echo "Diretorio de build nao existe. Execute 'make configure-lcd' (padrao) ou outro perfil."; \
 		exit 1; \
 	fi
 	@make -C $(BUILD_DIR) -j$$(nproc)
-	@echo "✅ Compilação concluída!"
-	@echo "📁 Executável: $(BUILD_DIR)/bin/app"
+	@echo "Compilacao concluida: $(BUILD_DIR)/bin/$(APP_NAME)"
+
+build-lcd: configure-lcd build
+
+build-lvgl: configure-lvgl build
+
+build-st7567: configure-st7567 build
+
+deploy:
+	@echo "Fazendo deploy ARMv7 para $(RPI_USER)@$(RPI_IP)..."
+	@if [ ! -f "$(BUILD_DIR)/bin/$(APP_NAME)" ]; then \
+		echo "Executavel nao encontrado. Execute 'make build' primeiro."; \
+		exit 1; \
+	fi
+	@scp $(BUILD_DIR)/bin/$(APP_NAME) $(RPI_USER)@$(RPI_IP):~/$(APP_NAME)
+	@echo "Deploy concluido: ~/$(APP_NAME)"
+
+deploy-lcd: build-lcd deploy
+
+deploy-lvgl: build-lvgl deploy
+
+deploy-st7567: build-st7567 deploy
+
+test: check
+	@echo "Executando testes basicos..."
+	@if [ -f "$(BUILD_DIR)/bin/$(APP_NAME)" ]; then \
+		echo "Executavel existe"; \
+		file $(BUILD_DIR)/bin/$(APP_NAME); \
+		ls -lh $(BUILD_DIR)/bin/$(APP_NAME); \
+	else \
+		echo "Executavel nao encontrado"; \
+		exit 1; \
+	fi
 
 clean:
-	@echo "🧹 Limpando arquivos de build..."
-	@if [ -d "$(BUILD_DIR)" ]; then \
-		rm -rf $(BUILD_DIR); \
-		echo "✅ Diretório $(BUILD_DIR) removido"; \
-	else \
-		echo "ℹ️  Nada para limpar"; \
-	fi
+	@echo "Limpando diretorio de build..."
+	@if [ -d "$(BUILD_DIR)" ]; then rm -rf $(BUILD_DIR); fi
+	@echo "Build removido"
 
 rebuild: clean setup build
 
-deploy:
-	@echo "🚀 Fazendo deploy para Raspberry Pi (ARMv7+)..."
-	@if [ ! -f "$(BUILD_DIR)/bin/app_armv7" ]; then \
-		echo "❌ Executável ARMv7 não encontrado. Execute 'make build' primeiro."; \
-		exit 1; \
-	fi
-	@echo "📤 Enviando arquivos para $(RPI_USER)@$(RPI_IP)..."
-	@scp $(BUILD_DIR)/bin/app_armv7 $(RPI_USER)@$(RPI_IP):~/app_armv7
-	@echo "✅ Deploy ARMv7 concluído!"
-
-test: check
-	@echo "🧪 Executando testes básicos..."
-	@if [ -f "$(BUILD_DIR)/bin/app_armv7" ]; then \
-		echo "✅ Executável existe"; \
-		file $(BUILD_DIR)/bin/app_armv7; \
-		ls -lh $(BUILD_DIR)/bin/app_armv7; \
-	else \
-		echo "❌ Executável não encontrado"; \
-		exit 1; \
-	fi
-
 info:
-	@echo "=== Informações do Projeto Modbus Reader ==="
+	@echo "=== Informacoes do Projeto NovaTherm (ARMv7) ==="
+	@echo "Alvo: Raspberry Pi Zero 2W (ARMv7/hard-float)"
+	@echo "Build dir padrao: $(BUILD_DIR)"
 	@echo ""
-	@echo "📁 Estrutura:"
-	@echo "  • src/main.c               - Código principal"
-	@echo "  • lib/usb_manager.*        - Biblioteca USB"
-	@echo "  • CMakeLists.txt           - Configuração CMake"
-	@echo "  • user_cross_compile_setup.cmake - Toolchain ARM"
-	@echo "  • scripts/                 - Scripts de build"
-	@echo "  • deps/                    - Dependências compiladas"
+	@echo "Dependencias estaticas:"
+	@echo "  libmodbus: $(shell [ -f deps/libmodbus/install/lib/libmodbus.a ] && echo 'OK' || echo 'MISSING')"
+	@echo "  libgpiod:  $(shell [ -f deps/libgpiod/install/lib/libgpiod.a ] && echo 'OK' || echo 'MISSING')"
+	@echo "  libudev:   $(shell [ -f deps/eudev/install/lib/libudev.a ] && echo 'OK' || echo 'MISSING')"
+	@echo "  sqlite3:   $(shell [ -f deps/sqlite3/install/lib/libsqlite3.a ] && echo 'OK' || echo 'MISSING')"
 	@echo ""
-	@echo "🔧 Dependências:"
-	@echo "  • libmodbus $(shell [ -f deps/libmodbus/install/lib/libmodbus.so ] && echo '✅' || echo '❌')"
-	@echo "  • libgpiod  $(shell [ -f deps/libgpiod/install/lib/libgpiod.so ] && echo '✅' || echo '❌')"
-	@echo "  • libudev   $(shell [ -f deps/eudev/install/lib/libudev.a ] && echo '✅' || echo '❌')"
-	@echo "  • sqlite3   $(shell [ -f deps/sqlite3/install/lib/libsqlite3.so ] && echo '✅' || echo '❌')"
-	@echo ""
-	@echo "🎯 Alvo: Raspberry Pi 3 (ARM Cortex-A53)"
-	@echo "📡 Protocolo: Modbus RTU via RS-485"
-	@echo ""
-	@if [ -f "$(BUILD_DIR)/bin/app" ]; then \
-		echo "📦 Executável: ✅ $(BUILD_DIR)/bin/app"; \
-		echo "📏 Tamanho: $$(ls -lh $(BUILD_DIR)/bin/app | awk '{print $$5}')"; \
+	@if [ -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
+		echo "Perfil de display no cache atual:"; \
+		grep -E "USE_LCD_I2C:BOOL|USE_LVGL_ILI9341:BOOL|USE_ST7567:BOOL" $(BUILD_DIR)/CMakeCache.txt || true; \
+		echo ""; \
+	fi
+	@if [ -f "$(BUILD_DIR)/bin/$(APP_NAME)" ]; then \
+		echo "Executavel: $(BUILD_DIR)/bin/$(APP_NAME)"; \
+		echo "Tamanho: $$(ls -lh $(BUILD_DIR)/bin/$(APP_NAME) | awk '{print $$5}')"; \
+		echo "Arquitetura: $$(file $(BUILD_DIR)/bin/$(APP_NAME) | cut -d: -f2)"; \
+		echo "Dependencias dinamicas (NEEDED):"; \
+		arm-linux-gnueabihf-readelf -d $(BUILD_DIR)/bin/$(APP_NAME) 2>/dev/null | grep NEEDED || echo "  nenhuma"; \
 	else \
-		echo "📦 Executável: ❌ Não compilado"; \
+		echo "Executavel ainda nao compilado"; \
 	fi
-
-# ========================================
-# Comandos para ARMv6 (Raspberry Pi 1)
-# ========================================
-
-setup-armv6:
-	@echo "🔧 Configurando ambiente de cross-compilation para ARMv6..."
-	@chmod +x scripts/setup_armv6.sh
-	@./scripts/setup_armv6.sh
-
-build-armv6:
-	@echo "🔨 Compilando projeto para ARMv6..."
-	@if [ ! -d "$(BUILD_DIR_ARMV6)" ]; then \
-		echo "⚠️  Diretório de build ARMv6 não existe. Execute 'make setup-armv6' primeiro."; \
-		exit 1; \
-	fi
-	@make -C $(BUILD_DIR_ARMV6) -j$$(nproc)
-	@echo "✅ Compilação ARMv6 concluída!"
-	@echo "📁 Executável: $(BUILD_DIR_ARMV6)/bin/app"
-
-clean-armv6:
-	@echo "🧹 Limpando arquivos de build ARMv6..."
-	@if [ -d "$(BUILD_DIR_ARMV6)" ]; then \
-		rm -rf $(BUILD_DIR_ARMV6); \
-		echo "✅ Diretório $(BUILD_DIR_ARMV6) removido"; \
-	else \
-		echo "ℹ️  Nada para limpar"; \
-	fi
-	@if [ -d "deps-armv6" ]; then \
-		echo "🗑️  Removendo dependências ARMv6..."; \
-		rm -rf deps-armv6; \
-		echo "✅ Dependências ARMv6 removidas"; \
-	fi
-
-deploy-armv6:
-	@echo "🚀 Fazendo deploy para Raspberry Pi 1 (ARMv6)..."
-	@if [ ! -f "$(BUILD_DIR_ARMV6)/bin/app_armv6" ]; then \
-		echo "❌ Executável ARMv6 não encontrado. Execute 'make build-armv6' primeiro."; \
-		exit 1; \
-	fi
-	@echo "📤 Enviando arquivos para $(RPI_USER)@$(RPI_IP)..."
-	@scp $(BUILD_DIR_ARMV6)/bin/app_armv6 $(RPI_USER)@$(RPI_IP):~/app_armv6
-	@scp install_service.sh $(RPI_USER)@$(RPI_IP):~/install_service.sh
-	@scp uninstall_service.sh $(RPI_USER)@$(RPI_IP):~/uninstall_service.sh
-	@scp config.txt $(RPI_USER)@$(RPI_IP):~/config.txt
-	@ssh $(RPI_USER)@$(RPI_IP) "chmod +x ~/install_service.sh ~/uninstall_service.sh"
-	@echo "✅ Deploy ARMv6 concluído!"
-	@echo ""
-	@echo "📋 Arquivos enviados:"
-	@echo "  • app_armv6 (executável)"
-	@echo "  • install_service.sh (instalador do serviço)"
-	@echo "  • uninstall_service.sh (desinstalador do serviço)"
-	@echo "  • config.txt (arquivo de configuração)"
-	@echo ""
-	@echo "🎯 Para instalar como serviço:"
-	@echo "   ssh $(RPI_USER)@$(RPI_IP)"
-	@echo "   sudo ./install_service.sh"
-	@echo ""
-	@echo "🎯 Para executar manualmente:"
-	@echo "   sudo ./app_armv6"
-
-info-armv6:
-	@echo "=== Informações do Projeto Modbus Reader ARMv6 ==="
-	@echo ""
-	@echo "🔧 Dependências ARMv6:"
-	@echo "  • libmodbus $(shell [ -f deps-armv6/libmodbus/install/lib/libmodbus.so ] && echo '✅' || echo '❌')"
-	@echo "  • libgpiod  $(shell [ -f deps-armv6/libgpiod/install/lib/libgpiod.so ] && echo '✅' || echo '❌')"
-	@echo "  • libudev   $(shell [ -f deps-armv6/eudev/install/lib/libudev.a ] && echo '✅' || echo '❌')"
-	@echo "  • sqlite3   $(shell [ -f deps-armv6/sqlite3/install/lib/libsqlite3.so ] && echo '✅' || echo '❌')"
-	@echo ""
-	@echo "🎯 Alvo: Raspberry Pi 1 (ARMv6)"
-	@echo "📡 Protocolo: Modbus RTU via RS-485"
-	@echo "🔧 Compilação: Estática (sem dependências externas)"
-	@echo ""
-	@if [ -f "$(BUILD_DIR_ARMV6)/bin/app_armv6" ]; then \
-		echo "📦 Executável ARMv6: ✅ $(BUILD_DIR_ARMV6)/bin/app_armv6"; \
-		echo "📏 Tamanho: $$(ls -lh $(BUILD_DIR_ARMV6)/bin/app_armv6 | awk '{print $$5}')"; \
-		echo "🏗️  Arquitetura: $$(file $(BUILD_DIR_ARMV6)/bin/app_armv6 | cut -d: -f2)"; \
-		echo "🔗 Linking: $$(file $(BUILD_DIR_ARMV6)/bin/app_armv6 | grep -o 'statically linked' || echo 'dinamicamente linkado')"; \
-	else \
-		echo "📦 Executável ARMv6: ❌ Não compilado"; \
-	fi
-
-# Atalhos convenientes
-configure: setup
-compile: build
-install: deploy
-status: info
-verify: check
-armv6: setup-armv6 build-armv6

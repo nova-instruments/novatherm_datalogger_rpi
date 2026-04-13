@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 
 # Configurações
 SERVICE_NAME="novatherm-datalogger"
-APP_NAME="app_armv6"
+APP_NAME="app_armv7"
 INSTALL_DIR="/opt/novatherm-datalogger"
 SYSTEM_CONFIG_FILE="/boot/firmware/config.txt"
 
@@ -148,4 +148,3 @@ echo -e "  O nome do dispositivo é configurado em: ${YELLOW}$SYSTEM_CONFIG_FILE
 echo -e "  Adicione no final do arquivo: ${YELLOW}DEVICE_NAME=NI00003${NC}"
 echo -e "  Comando para editar: ${YELLOW}sudo nano $SYSTEM_CONFIG_FILE${NC}"
 echo -e "  Depois reinicie o serviço: ${YELLOW}sudo systemctl restart $SERVICE_NAME${NC}\n"
-

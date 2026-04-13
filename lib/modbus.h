@@ -44,6 +44,8 @@ typedef struct modbus_t modbus_t;
 typedef struct {
     uint16_t ch_raw[MODBUS_NUM_CHANNELS];     // Valores brutos dos 7 canais
     float ch_temp[MODBUS_NUM_CHANNELS];       // Temperaturas convertidas (°C)
+                                              // NOTA: CH1 e CH2 têm correção polinomial aplicada
+                                              // y = -0,0049x² + 1,3384x - 5,3759 (R² = 0,9986)
     bool ch_valid[MODBUS_NUM_CHANNELS];       // Flags de validade de cada canal
     bool ch_error[MODBUS_NUM_CHANNELS];       // Flags de erro de sensor (desconectado)
 } modbus_data_t;
