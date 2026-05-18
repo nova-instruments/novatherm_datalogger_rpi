@@ -56,8 +56,30 @@ void controller_set_setpoint(controller_context_t* ctx, float setpoint) {
     }
 }
 
+void controller_set_hysteresis(controller_context_t* ctx, float hysteresis) {
+    if (!ctx) {
+        return;
+    }
+
+    if (hysteresis < 0.1f) {
+        hysteresis = 0.1f;
+    }
+    if (hysteresis > 5.0f) {
+        hysteresis = 5.0f;
+    }
+
+    if (ctx->hysteresis != hysteresis) {
+        printf("🎯 Histerese alterada: %.1f°C -> %.1f°C\n", ctx->hysteresis, hysteresis);
+        ctx->hysteresis = hysteresis;
+    }
+}
+
 float controller_get_setpoint(controller_context_t* ctx) {
     return ctx ? ctx->setpoint : 0.0f;
+}
+
+float controller_get_hysteresis(controller_context_t* ctx) {
+    return ctx ? ctx->hysteresis : CONTROLLER_HYSTERESIS;
 }
 
 bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2,
@@ -84,9 +106,9 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
 
         double defrost_duration = difftime(now, ctx->defrost_start_time);
 
-        // Condição 1: CH2 atingiu 0°C - parar degelo
+        // Condição 1: PR2 atingiu 0°C - parar degelo
         if (ch2_valid && temp_ch2 >= DEFROST_STOP_TEMP) {
-            printf("🛑 DEGELO INTERROMPIDO: CH2 atingiu %.1f°C (duração: %.0fs)\n",
+            printf("🛑 DEGELO INTERROMPIDO: PR2 atingiu %.1f°C (duração: %.0fs)\n",
                    temp_ch2, defrost_duration);
             ctx->state = CONTROLLER_STATE_IDLE;
             ctx->heater_on = false;
@@ -113,10 +135,10 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
 
     // ========== INICIAR DEGELO SE NECESSÁRIO ==========
     if (ctx->defrost_needed && ch2_valid) {
-        // Verificar se CH2 <= -12°C
+        // Verificar se PR2 <= -12°C
         if (temp_ch2 <= DEFROST_TEMP_THRESHOLD) {
             printf("\n❄️  INICIANDO DEGELO:\n");
-            printf("   └─ CH2: %.1f°C (threshold: %.1f°C)\n", temp_ch2, DEFROST_TEMP_THRESHOLD);
+            printf("   └─ PR2: %.1f°C (threshold: %.1f°C)\n", temp_ch2, DEFROST_TEMP_THRESHOLD);
             printf("   └─ Duração máxima: %d segundos\n", DEFROST_MAX_DURATION_SEC);
             ctx->state = CONTROLLER_STATE_DEFROSTING;
             ctx->heater_on = true;
@@ -125,8 +147,8 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
             ctx->defrost_cycles++;
             return true;
         } else {
-            // CH2 > -12°C, não precisa degelo
-            printf("✅ DEGELO NÃO NECESSÁRIO: CH2 = %.1f°C (> %.1f°C)\n",
+            // PR2 > -12°C, não precisa degelo
+            printf("✅ DEGELO NÃO NECESSÁRIO: PR2 = %.1f°C (> %.1f°C)\n",
                    temp_ch2, DEFROST_TEMP_THRESHOLD);
             ctx->defrost_needed = false;
             ctx->last_defrost_time = now;  // Resetar timer
@@ -135,9 +157,9 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
 
     // ========== CONTROLE DE TEMPERATURA ON/OFF ==========
     if (!ch1_valid) {
-        // Sensor CH1 inválido - modo seguro (desligar compressor)
+        // Sensor PR1 inválido - modo seguro (desligar compressor)
         if (ctx->compressor_on) {
-            printf("\n⚠️  MODO SEGURO: CH1 inválido - desligando compressor\n");
+            printf("\n⚠️  MODO SEGURO: PR1 inválido - desligando compressor\n");
             ctx->compressor_on = false;
             ctx->state = CONTROLLER_STATE_IDLE;
         }
@@ -151,7 +173,7 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
     if (temp_ch1 > (ctx->setpoint + ctx->hysteresis)) {
         // Temperatura acima do limite superior - ligar compressor
         if (!ctx->compressor_on) {
-            printf("\n🌡️  CONTROLE: CH1=%.1f°C > Setpoint+Histerese=%.1f°C\n",
+            printf("\n🌡️  CONTROLE: PR1=%.1f°C > Setpoint+Histerese=%.1f°C\n",
                    temp_ch1, ctx->setpoint + ctx->hysteresis);
             ctx->compressor_on = true;
             ctx->state = CONTROLLER_STATE_COOLING;
@@ -160,7 +182,7 @@ bool controller_update(controller_context_t* ctx, float temp_ch1, float temp_ch2
     } else if (temp_ch1 < ctx->setpoint) {
         // Temperatura abaixo do setpoint - desligar compressor
         if (ctx->compressor_on) {
-            printf("\n🌡️  CONTROLE: CH1=%.1f°C < Setpoint=%.1f°C\n",
+            printf("\n🌡️  CONTROLE: PR1=%.1f°C < Setpoint=%.1f°C\n",
                    temp_ch1, ctx->setpoint);
             ctx->compressor_on = false;
             ctx->state = CONTROLLER_STATE_WAITING;
@@ -220,4 +242,3 @@ uint32_t controller_get_time_to_next_defrost(controller_context_t* ctx) {
 
     return (uint32_t)(seconds_interval - seconds_since_defrost);
 }
-

@@ -17,6 +17,10 @@ static struct gpiod_line *door_line = NULL;
 // Estado anterior da porta (para detecção de mudança)
 static int last_door_state = -1;  // -1 = não inicializado
 
+static bool input_door_is_open_from_value(int value) {
+    return (value == INPUT_DOOR_OPEN_LEVEL);
+}
+
 /**
  * @brief Inicializa o monitoramento das entradas digitais
  */
@@ -28,7 +32,7 @@ int input_init(void) {
         return -1;
     }
 
-    // Obter linha GPIO 10 (Sensor de Porta)
+    // Obter linha GPIO do sensor de porta
     door_line = gpiod_chip_get_line(chip, INPUT_DOOR_GPIO);
     if (!door_line) {
         fprintf(stderr, "❌ Erro ao obter linha GPIO %d (Sensor de Porta)\n", INPUT_DOOR_GPIO);
@@ -50,8 +54,9 @@ int input_init(void) {
     last_door_state = gpiod_line_get_value(door_line);
 
     printf("🚪 Sensor de porta inicializado:\n");
-    printf("   - GPIO %d (pino físico 19)\n", INPUT_DOOR_GPIO);
-    printf("   - Estado inicial: %s\n", last_door_state ? "ABERTA" : "FECHADA");
+    printf("   - GPIO %d (pino físico 11)\n", INPUT_DOOR_GPIO);
+    printf("   - Estado inicial: %s\n",
+           input_door_is_open_from_value(last_door_state) ? "ABERTA" : "FECHADA");
 
     return 0;
 }
@@ -64,8 +69,7 @@ bool input_door_is_open(void) {
     
     int value = gpiod_line_get_value(door_line);
     
-    // Lógica: 1 = porta aberta (pull-up), 0 = porta fechada (conectado ao GND)
-    return (value == 1);
+    return input_door_is_open_from_value(value);
 }
 
 /**
@@ -81,14 +85,14 @@ bool input_door_state_changed(bool* current_state) {
     
     if (changed) {
         printf("🚪 Mudança detectada: %s → %s\n",
-               last_door_state ? "ABERTA" : "FECHADA",
-               value ? "ABERTA" : "FECHADA");
+               input_door_is_open_from_value(last_door_state) ? "ABERTA" : "FECHADA",
+               input_door_is_open_from_value(value) ? "ABERTA" : "FECHADA");
     }
     
     last_door_state = value;
     
     if (current_state) {
-        *current_state = (value == 1);  // true = aberta, false = fechada
+        *current_state = input_door_is_open_from_value(value);  // true = aberta, false = fechada
     }
     
     return changed;
@@ -120,4 +124,3 @@ void input_cleanup(void) {
 
     printf("🚪 Entradas digitais finalizadas\n");
 }
-

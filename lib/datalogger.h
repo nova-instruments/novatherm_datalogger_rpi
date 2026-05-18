@@ -24,35 +24,36 @@ typedef struct {
     char device_name[32];       // Nome do dispositivo (ex: "NI00002")
     char log_file_path[DATALOGGER_MAX_PATH];  // Caminho completo do arquivo de log TXT
     char db_file_path[DATALOGGER_MAX_PATH];   // Caminho completo do arquivo de banco SQLite
+    char secondary_db_file_path[DATALOGGER_MAX_PATH]; // Caminho do banco secundário SQLite
     uint32_t record_counter;    // Contador de registros
-    int num_channels;           // Número de canais a serem gravados (1 a 7)
+    int num_channels;           // Número de canais a serem gravados (1 a 6)
     bool initialized;           // Flag de inicialização
     FILE* log_file;            // Handle do arquivo de log TXT
     sqlite3* db;               // Handle do banco de dados SQLite
+    sqlite3* secondary_db;     // Handle do banco secundário
 } datalogger_context_t;
 
-// Estrutura para um registro de dados (formato TXT) - NT18B07
+// Estrutura para um registro de dados (formato TXT)
 typedef struct {
     uint32_t record_number;     // Número do registro (R)
     struct tm timestamp;        // Data e hora
-    float ch_temp[MODBUS_NUM_CHANNELS];  // Temperaturas dos 7 canais (°C)
+    float ch_temp[MODBUS_NUM_CHANNELS];  // PR1/PR2 (°C), AC/DC (V), NTC1R/NTC2R (ohms)
     bool ch_valid[MODBUS_NUM_CHANNELS];  // Flags de validade de cada canal
     bool ch_error[MODBUS_NUM_CHANNELS];  // Flags de erro de sensor (desconectado)
     bool compressor_on;         // Status do compressor (true = ligado)
     bool heater_on;             // Status da resistência (true = ligado)
 } datalogger_record_t;
 
-// Estrutura para registro no banco SQLite - NT18B07
+// Estrutura para registro no banco SQLite
 typedef struct {
     int IndexID;               // Chave primária (auto-incremento)
     long long CollectTime;     // Timestamp em milissegundos
-    float CH1;                 // Temperatura canal 1 em °C (1 casa decimal)
-    float CH2;                 // Temperatura canal 2 em °C (1 casa decimal)
-    float CH3;                 // Temperatura canal 3 em °C (1 casa decimal)
-    float CH4;                 // Temperatura canal 4 em °C (1 casa decimal)
-    float CH5;                 // Temperatura canal 5 em °C (1 casa decimal)
-    float CH6;                 // Temperatura canal 6 em °C (1 casa decimal)
-    float CH7;                 // Temperatura canal 7 em °C (1 casa decimal)
+    float PR1;                 // PR1 em °C (1 casa decimal)
+    float PR2;                 // PR2 em °C (1 casa decimal)
+    float AC;                  // AC em V (1 casa decimal)
+    float DC;                  // DC em V (1 casa decimal)
+    float NTC1R;               // Resistência NTC1 em ohms
+    float NTC2R;               // Resistência NTC2 em ohms
     int Compressor;            // Status do compressor (0 = desligado, 1 = ligado)
     int Heater;                // Status da resistência (0 = desligado, 1 = ligado)
 } datalogger_db_record_t;
@@ -74,7 +75,7 @@ typedef struct {
 /**
  * @brief Inicializa o sistema de datalogger
  * @param device_name Nome do dispositivo (ex: "NI00002")
- * @param num_channels Número de canais a serem gravados (1 a 7)
+ * @param num_channels Número de canais a serem gravados (1 a 6)
  * @return Ponteiro para contexto do datalogger ou NULL em caso de erro
  */
 datalogger_context_t* datalogger_init(const char* device_name, int num_channels);
@@ -95,6 +96,11 @@ void datalogger_cleanup(datalogger_context_t* ctx);
  */
 bool datalogger_log_data(datalogger_context_t* ctx, const modbus_data_t* modbus_data,
                         bool compressor_on, bool heater_on);
+bool datalogger_log_secondary_data(datalogger_context_t* ctx,
+                                   bool n1r_valid, float n1r,
+                                   bool n2r_valid, float n2r,
+                                   bool t1_valid, float t1,
+                                   bool t2_valid, float t2);
 
 /**
  * @brief Obtém data e hora do RTC do sistema

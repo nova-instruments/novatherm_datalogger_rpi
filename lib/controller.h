@@ -73,6 +73,7 @@ void controller_cleanup(controller_context_t* ctx);
  * @param setpoint Novo setpoint (°C)
  */
 void controller_set_setpoint(controller_context_t* ctx, float setpoint);
+void controller_set_hysteresis(controller_context_t* ctx, float hysteresis);
 
 /**
  * @brief Obtém o setpoint atual
@@ -80,6 +81,7 @@ void controller_set_setpoint(controller_context_t* ctx, float setpoint);
  * @return Setpoint atual (°C)
  */
 float controller_get_setpoint(controller_context_t* ctx);
+float controller_get_hysteresis(controller_context_t* ctx);
 
 /**
  * @brief Atualiza o controlador com novas leituras de temperatura
@@ -139,4 +141,3 @@ uint32_t controller_get_time_to_next_defrost(controller_context_t* ctx);
 #endif
 
 #endif // CONTROLLER_H
-

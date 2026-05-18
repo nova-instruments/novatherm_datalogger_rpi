@@ -76,10 +76,17 @@ extern "C" {
 // Enumeração das telas disponíveis
 typedef enum {
     LCD_SCREEN_MAIN_TEMP = 0,       // Tela 0: Temperatura principal (BigFont)
-    LCD_SCREEN_INFO,                // Tela 1: Informações (CH2, MAX, MIN, SP, Data)
+    LCD_SCREEN_INFO,                // Tela 1: Informações (PR2, AC, DC, Porta, SP)
     LCD_SCREEN_DIAGNOSTICS,         // Tela 2: Status dos relés
+    LCD_SCREEN_RELAY_TEST,          // Tela 3: Teste temporário de relés Modbus
+    LCD_SCREEN_SLAVE2_TEMPS,        // Tela 4: T1/T2 do slave Modbus 2
     LCD_SCREEN_COUNT                // Total de telas
 } lcd_screen_t;
+
+typedef enum {
+    LCD_RELAY_TEST_TARGET_LAMP = 0,
+    LCD_RELAY_TEST_TARGET_DIALER
+} lcd_relay_test_target_t;
 
 // Contexto do display LCD
 typedef struct lcd_context_s {
@@ -92,12 +99,13 @@ typedef struct lcd_context_s {
     float temp_max;                 // Temperatura máxima registrada
     float temp_min;                 // Temperatura mínima registrada
     bool wifi_connected;            // Status da conexão WiFi
-    float filtered_temp_ch1;        // Temperatura CH1 filtrada (filtro passa-baixas)
+    float filtered_temp_ch1;        // Temperatura PR1 filtrada (filtro passa-baixas)
     bool first_temp_reading;        // Flag para primeira leitura (inicialização do filtro)
     float last_displayed_temp;      // Última temperatura exibida (para evitar redesenho desnecessário)
     float last_displayed_max;       // Último Max exibido
     float last_displayed_min;       // Último Min exibido
     bool screen_needs_redraw;       // Flag para forçar redesenho completo
+    lcd_relay_test_target_t relay_test_target;  // Relé selecionado na tela de teste
 } lcd_context_t;
 
 /**
@@ -193,7 +201,9 @@ float lcd_get_setpoint(lcd_context_t* ctx);
 void lcd_update_current_screen(lcd_context_t* ctx, const char* device_name,
                                const modbus_data_t* data, uint32_t record_count,
                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on,
-                               bool door_open);
+                               bool door_open,
+                               bool slave2_t1_valid, float slave2_t1,
+                               bool slave2_t2_valid, float slave2_t2);
 
 /**
  * @brief Cria caracteres customizados para números grandes (BigFont)
@@ -242,9 +252,28 @@ void lcd_update_temp_minmax(lcd_context_t* ctx, float current_temp);
  */
 void lcd_set_wifi_status(lcd_context_t* ctx, bool connected);
 
+/**
+ * @brief Verifica se a tela atual é a tela de teste de relés
+ * @param ctx Contexto do LCD
+ * @return true se tela de teste está ativa
+ */
+bool lcd_is_relay_test_screen(lcd_context_t* ctx);
+
+/**
+ * @brief Alterna o relé selecionado na tela de teste
+ * @param ctx Contexto do LCD
+ */
+void lcd_relay_test_toggle_target(lcd_context_t* ctx);
+
+/**
+ * @brief Obtém o relé selecionado na tela de teste
+ * @param ctx Contexto do LCD
+ * @return Alvo selecionado (lâmpada ou discadora)
+ */
+lcd_relay_test_target_t lcd_relay_test_get_target(lcd_context_t* ctx);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif // LCD_I2C_H
-

@@ -403,38 +403,22 @@ void oled_display_datalogger_info(oled_context_t* ctx, const char* device_name,
     // Linha separadora
     oled_draw_hline(ctx, 0, 10, OLED_WIDTH);
 
-    // Exibir temperaturas dos 7 canais (2 colunas)
-    // Coluna esquerda: CH1, CH2, CH3, CH4
-    // Coluna direita: CH5, CH6, CH7
+    // Exibir leituras dos canais (OLED exibe até 4 linhas úteis)
+    static const char* labels[MODBUS_NUM_CHANNELS] = {"PR1", "PR2", "AC", "DC", "N1R", "N2R"};
+    const int display_channels = (MODBUS_NUM_CHANNELS < 4) ? MODBUS_NUM_CHANNELS : 4;
     int y_pos = 16;
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < display_channels; i++) {
         if (data->ch_valid[i]) {
             if (data->ch_error[i]) {
-                snprintf(line, sizeof(line), "CH%d:ERR", i + 1);
+                snprintf(line, sizeof(line), "%s:ERR", labels[i]);
             } else {
-                snprintf(line, sizeof(line), "CH%d:%.1f", i + 1, data->ch_temp[i]);
+                snprintf(line, sizeof(line), "%s:%.1f", labels[i], data->ch_temp[i]);
             }
         } else {
-            snprintf(line, sizeof(line), "CH%d:---", i + 1);
+            snprintf(line, sizeof(line), "%s:---", labels[i]);
         }
         oled_draw_string(ctx, 0, y_pos, line);
-        y_pos += 12;
-    }
-
-    // Coluna direita: CH5, CH6, CH7
-    y_pos = 16;
-    for (int i = 4; i < MODBUS_NUM_CHANNELS; i++) {
-        if (data->ch_valid[i]) {
-            if (data->ch_error[i]) {
-                snprintf(line, sizeof(line), "CH%d:ERR", i + 1);
-            } else {
-                snprintf(line, sizeof(line), "CH%d:%.1f", i + 1, data->ch_temp[i]);
-            }
-        } else {
-            snprintf(line, sizeof(line), "CH%d:---", i + 1);
-        }
-        oled_draw_string(ctx, 64, y_pos, line);
         y_pos += 12;
     }
 
@@ -572,11 +556,17 @@ void oled_display_diagnostics_screen(oled_context_t* ctx, bool lamp_on, bool dia
 void oled_update_current_screen(oled_context_t* ctx, const char* device_name,
                                 const modbus_data_t* data, uint32_t record_count,
                                 bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on,
-                                bool door_open) {
+                                bool door_open,
+                                bool slave2_t1_valid, float slave2_t1,
+                                bool slave2_t2_valid, float slave2_t2) {
     if (!ctx) return;
 
     // Parâmetro door_open não usado no OLED (apenas no LCD)
     (void)door_open;
+    (void)slave2_t1_valid;
+    (void)slave2_t1;
+    (void)slave2_t2_valid;
+    (void)slave2_t2;
 
     switch (ctx->current_screen) {
         case SCREEN_TEMPERATURES:

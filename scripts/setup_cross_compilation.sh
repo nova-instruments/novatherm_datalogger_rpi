@@ -111,12 +111,6 @@ fi
 log_success "Cross-compiler ARM instalado:"
 arm-linux-gnueabihf-gcc --version | head -1
 
-# Instalar dependências para LVGL
-log_info "Instalando dependências para LVGL..."
-sudo apt-get install -y \
-    libsdl2-dev \
-    libevdev-dev
-
 # Criar diretório de dependências se não existir
 DEPS_DIR="$PROJECT_ROOT/deps"
 mkdir -p "$DEPS_DIR"

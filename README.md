@@ -33,23 +33,20 @@ O setup compila as dependências em `deps/` e já configura o perfil padrão (LC
 ## Perfis de display
 
 - Padrão: LCD 20x4 I2C
-- Alternativo: ILI9341 + LVGL
-- Alternativo: ST7567
+- Opcional: ST7789 + LVGL + EC11
 
 Comandos:
 
 ```bash
 make configure-lcd
-make configure-lvgl
-make configure-st7567
+make configure-st7789 LVGL_DIR=/caminho/para/lvgl
 ```
 
 Atalhos de build:
 
 ```bash
 make build-lcd
-make build-lvgl
-make build-st7567
+make build-st7789 LVGL_DIR=/caminho/para/lvgl
 ```
 
 Build genérico (usa o perfil já configurado):
@@ -64,16 +61,6 @@ Saída esperada:
 build-rpi/bin/app_armv7
 ```
 
-## Observação sobre LVGL
-
-Para o perfil `ILI9341 + LVGL`, o CMake exige:
-
-```bash
-deps/lvgl/install/lib/liblvgl.a
-```
-
-Se esse arquivo não existir, o `make configure-lvgl` falha com erro de dependência ausente.
-
 ## Deploy
 
 Deploy do binário atual:
@@ -86,8 +73,7 @@ Deploy com troca automática de perfil:
 
 ```bash
 make deploy-lcd RPI_IP=<IP_DA_PI> RPI_USER=<USUARIO>
-make deploy-lvgl RPI_IP=<IP_DA_PI> RPI_USER=<USUARIO>
-make deploy-st7567 RPI_IP=<IP_DA_PI> RPI_USER=<USUARIO>
+make deploy-st7789 LVGL_DIR=/caminho/para/lvgl RPI_IP=<IP_DA_PI> RPI_USER=<USUARIO>
 ```
 
 Deploy manual:

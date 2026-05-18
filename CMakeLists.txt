@@ -1,13 +1,26 @@
 cmake_minimum_required(VERSION 3.16)
 project(modbus_reader C)
 
+# Projeto exclusivo para build ARM (cross-compilation).
+# Evita configuração acidental de build local x86/x64.
+if(NOT CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR
+        "Build local desabilitado. Use cross-compilation ARM com: "
+        "-DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake")
+endif()
+
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armv6l|armv7l)$")
+    message(FATAL_ERROR
+        "Arquitetura alvo invalida: ${CMAKE_SYSTEM_PROCESSOR}. "
+        "Este projeto aceita apenas alvo ARM.")
+endif()
+
 # Configurar paths das dependências ARMv7
 set(DEPS_DIR "${CMAKE_SOURCE_DIR}/deps")
 set(LIBMODBUS_DIR "${DEPS_DIR}/libmodbus/install")
 set(LIBGPIOD_DIR "${DEPS_DIR}/libgpiod/install")
 set(LIBUDEV_DIR "${DEPS_DIR}/eudev/install")
 set(SQLITE3_DIR "${DEPS_DIR}/sqlite3/install")
-set(LVGL_DIR "${DEPS_DIR}/lvgl/install")
 
 # Verificar se as bibliotecas existem
 if(NOT EXISTS "${LIBMODBUS_DIR}/lib/libmodbus.a")
@@ -36,8 +49,6 @@ include_directories(
     ${LIBGPIOD_DIR}/include
     ${LIBUDEV_DIR}/include
     ${SQLITE3_DIR}/include
-    ${LVGL_DIR}/include
-    ${LVGL_DIR}/include/lvgl
     ${CMAKE_SOURCE_DIR}/lib
 )
 
@@ -47,8 +58,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Opção para escolher o tipo de display
 option(USE_LCD_I2C "Usar LCD 20x4 I2C ao invés de OLED SSD1306" ON)
-option(USE_ST7567 "Usar ST7567 128x64 COG LCD" OFF)
-option(USE_LVGL_ILI9341 "Usar LVGL v9.x com ILI9341 240x320 TFT SPI" OFF)
+option(USE_ST7789_EC11 "Usar display ST7789 + LVGL + EC11" OFF)
 
 # Configurar diretório de saída
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -62,24 +72,21 @@ add_library(keyboard STATIC lib/keyboard.c)
 add_library(input STATIC lib/input.c)
 add_library(controller STATIC lib/controller.c)
 
-# Biblioteca de display (LVGL+ILI9341, ST7567, LCD 20x4 ou OLED)
-if(USE_LVGL_ILI9341)
-    # Verificar se LVGL foi compilado
-    if(NOT EXISTS "${LVGL_DIR}/lib/liblvgl.a")
-        message(FATAL_ERROR "LVGL não encontrado em ${LVGL_DIR}/lib/liblvgl.a")
-    endif()
-
-    add_library(ili9341_lib STATIC lib/ili9341_spi.c)
-    add_library(display_lib STATIC lib/display_lvgl.c)
-    target_link_libraries(display_lib ili9341_lib)
-    add_definitions(-DUSE_LVGL_ILI9341)
-    add_definitions(-DLV_CONF_INCLUDE_SIMPLE)
-    message(STATUS "Display selecionado: LVGL v9.x + ILI9341 240x320 TFT SPI")
-    message(STATUS "  GPIO_DC=22, GPIO_RST=27")
-elseif(USE_ST7567)
-    add_library(display_lib STATIC lib/lcd_st7567.c)
-    add_definitions(-DUSE_ST7567)
-    message(STATUS "Display selecionado: ST7567 128x64 COG LCD (0x3F)")
+# Biblioteca de display (LCD 20x4, OLED SSD1306 ou ST7789+LVGL)
+if(USE_ST7789_EC11)
+    set(DISPLAY_ST7789_EC11_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+    set(LV_BUILD_CONF_PATH "${CMAKE_SOURCE_DIR}/display_st7789_ec11_rpi/config/lv_conf.h" CACHE PATH "" FORCE)
+    add_subdirectory(display_st7789_ec11_rpi)
+    add_library(display_lib STATIC
+        lib/display_st7789_lvgl.c
+        lib/assets/bg_ihm.c
+        lib/assets/bg_ihm_2.c
+        lib/assets/logo_320x240.c
+    )
+    target_link_libraries(display_lib PUBLIC display_st7789_ec11)
+    include_directories(${CMAKE_SOURCE_DIR}/display_st7789_ec11_rpi/include)
+    add_definitions(-DUSE_ST7789_EC11)
+    message(STATUS "Display selecionado: ST7789 + LVGL + EC11")
 elseif(USE_LCD_I2C)
     add_library(display_lib STATIC lib/lcd_i2c.c)
     add_definitions(-DUSE_LCD_I2C)
@@ -113,14 +120,6 @@ set(COMMON_LIBS
     dl
     m
 )
-
-# Adicionar LVGL se estiver habilitado
-if(USE_LVGL_ILI9341)
-    list(APPEND COMMON_LIBS
-        ${LVGL_DIR}/lib/liblvgl.a
-        ili9341_lib
-    )
-endif()
 
 target_link_libraries(app_armv7 ${COMMON_LIBS})
 

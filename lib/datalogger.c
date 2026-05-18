@@ -15,6 +15,16 @@
 #include <unistd.h>
 #include <math.h>
 
+static const char* DB_CHANNEL_COLUMNS[MODBUS_NUM_CHANNELS] = {"PR1", "PR2", "AC", "DC", "NTC1R", "NTC2R"};
+static const char* DB_LEGACY_CHANNEL_COLUMNS[MODBUS_NUM_CHANNELS] = {"CH1", "CH2", "CH3", "CH4", "CH5", "CH6"};
+
+static bool datalogger_init_secondary_database(datalogger_context_t* ctx);
+static bool datalogger_insert_secondary_data(datalogger_context_t* ctx, const struct tm* tm_info,
+                                             bool n1r_valid, float n1r,
+                                             bool n2r_valid, float n2r,
+                                             bool t1_valid, float t1,
+                                             bool t2_valid, float t2);
+
 /**
  * @brief Cria diretório se não existir
  */
@@ -27,6 +37,74 @@ static bool create_directory_if_not_exists(const char* path) {
             return false;
         }
         printf("Diretório criado: %s\n", path);
+    }
+
+    return true;
+}
+
+/**
+ * @brief Verifica se uma coluna existe na tabela DataGrpData
+ */
+static bool db_column_exists(sqlite3* db, const char* column_name) {
+    if (!db || !column_name) return false;
+
+    sqlite3_stmt* stmt = NULL;
+    const char* sql = "PRAGMA table_info(DataGrpData);";
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return false;
+    }
+
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* name = sqlite3_column_text(stmt, 1);
+        if (name && strcmp((const char*)name, column_name) == 0) {
+            found = true;
+            break;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+/**
+ * @brief Migra colunas legadas CH1..CH4 para PR1/PR2/AC/DC quando necessário
+ */
+static bool db_migrate_channel_columns(sqlite3* db) {
+    if (!db) return false;
+
+    for (int i = 0; i < MODBUS_NUM_CHANNELS; i++) {
+        const char* new_col = DB_CHANNEL_COLUMNS[i];
+        const char* legacy_col = DB_LEGACY_CHANNEL_COLUMNS[i];
+
+        if (db_column_exists(db, new_col)) {
+            continue;
+        }
+
+        char* err_msg = NULL;
+        char sql[256];
+
+        // Adiciona coluna nova com default para preservar NOT NULL
+        snprintf(sql, sizeof(sql),
+                 "ALTER TABLE DataGrpData ADD COLUMN %s REAL NOT NULL DEFAULT -999.9;",
+                 new_col);
+        if (sqlite3_exec(db, sql, NULL, NULL, &err_msg) != SQLITE_OK) {
+            fprintf(stderr, "Erro ao adicionar coluna %s: %s\n", new_col, err_msg);
+            sqlite3_free(err_msg);
+            return false;
+        }
+
+        // Se existir coluna legada, copia valores para a nova coluna
+        if (db_column_exists(db, legacy_col)) {
+            snprintf(sql, sizeof(sql),
+                     "UPDATE DataGrpData SET %s = %s;",
+                     new_col, legacy_col);
+            if (sqlite3_exec(db, sql, NULL, NULL, &err_msg) != SQLITE_OK) {
+                fprintf(stderr, "Erro ao migrar dados %s -> %s: %s\n", legacy_col, new_col, err_msg);
+                sqlite3_free(err_msg);
+                return false;
+            }
+        }
     }
 
     return true;
@@ -60,31 +138,50 @@ static uint32_t get_last_record_number(const char* filepath) {
  */
 bool datalogger_get_rtc_time(struct tm* tm_info) {
     if (!tm_info) return false;
-    
+    memset(tm_info, 0, sizeof(*tm_info));
+
     // Primeiro tenta obter do RTC via hwclock
     FILE* fp = popen("hwclock -r 2>/dev/null", "r");
     if (fp) {
         char buffer[256];
         if (fgets(buffer, sizeof(buffer), fp)) {
             pclose(fp);
-            
+
             // Tentar fazer parse do formato do hwclock
             // Formato típico: "2024-09-15 14:30:25.123456-03:00"
-            if (strptime(buffer, "%Y-%m-%d %H:%M:%S", tm_info)) {
-                return true;
+            struct tm parsed_tm;
+            memset(&parsed_tm, 0, sizeof(parsed_tm));
+            if (strptime(buffer, "%Y-%m-%d %H:%M:%S", &parsed_tm)) {
+                time_t parsed_ts = mktime(&parsed_tm);
+                // Rejeita datas inválidas/próximas da época Unix para evitar 1969/1970
+                if (parsed_ts >= 1577836800) { // 2020-01-01 00:00:00 UTC
+                    *tm_info = parsed_tm;
+                    return true;
+                }
             }
         }
         pclose(fp);
     }
-    
+
     // Fallback: usar hora do sistema
     time_t now = time(NULL);
+    // Também protege contra relógio do sistema inválido
+    if (now >= 1577836800) {
+        struct tm* sys_time = localtime(&now);
+        if (sys_time) {
+            *tm_info = *sys_time;
+            return true;
+        }
+    }
+
+    // Último fallback: não bloquear logging, mas sinalizar data inválida
     struct tm* sys_time = localtime(&now);
-    if (sys_time) {
+    if (sys_time != NULL) {
         *tm_info = *sys_time;
+        fprintf(stderr, "⚠️  Relógio do sistema/RTC inválido (epoch baixo). Verifique NTP/RTC.\n");
         return true;
     }
-    
+
     return false;
 }
 
@@ -111,6 +208,7 @@ datalogger_context_t* datalogger_init(const char* device_name, int num_channels)
     ctx->initialized = false;
     ctx->log_file = NULL;
     ctx->db = NULL;
+    ctx->secondary_db = NULL;
 
     // Criar diretório de logs
     if (!create_directory_if_not_exists(DATALOGGER_LOG_DIR)) {
@@ -127,6 +225,10 @@ datalogger_context_t* datalogger_init(const char* device_name, int num_channels)
     // Gerar nome do arquivo de banco de dados (nome fixo sem timestamp)
     snprintf(ctx->db_file_path, sizeof(ctx->db_file_path),
              "%s/%s.db",
+             DATALOGGER_LOG_DIR,
+             ctx->device_name);
+    snprintf(ctx->secondary_db_file_path, sizeof(ctx->secondary_db_file_path),
+             "%s/%s_secondary.db",
              DATALOGGER_LOG_DIR,
              ctx->device_name);
 
@@ -165,6 +267,9 @@ datalogger_context_t* datalogger_init(const char* device_name, int num_channels)
     if (!datalogger_init_database(ctx)) {
         printf("⚠️  Aviso: Falha ao inicializar banco SQLite (continuando apenas com TXT)\n");
     }
+    if (!datalogger_init_secondary_database(ctx)) {
+        printf("⚠️  Aviso: Falha ao inicializar banco SQLite secundário\n");
+    }
 
     ctx->initialized = true;
 
@@ -173,6 +278,9 @@ datalogger_context_t* datalogger_init(const char* device_name, int num_channels)
     printf("  Arquivo TXT: %s\n", ctx->log_file_path);
     if (ctx->db) {
         printf("  Arquivo DB: %s\n", ctx->db_file_path);
+    }
+    if (ctx->secondary_db) {
+        printf("  Arquivo DB2: %s\n", ctx->secondary_db_file_path);
     }
     
     return ctx;
@@ -196,14 +304,21 @@ void datalogger_cleanup(datalogger_context_t* ctx) {
 
 bool datalogger_create_header(datalogger_context_t* ctx) {
     if (!ctx || !ctx->log_file) return false;
+    static const char* channel_names[MODBUS_NUM_CHANNELS] = {
+        "PR1", "PR2", "AC", "DC", "NTC1R", "NTC2R"
+    };
 
-    // Escrever cabeçalho no formato NT18B07 (dinâmico baseado em num_channels)
+    // Escrever cabeçalho dinâmico baseado em num_channels
     fprintf(ctx->log_file, "NAME: %s\n", ctx->device_name);
     fprintf(ctx->log_file, "R;Data Hora");
 
     // Adicionar colunas de canais dinamicamente
     for (int i = 0; i < ctx->num_channels; i++) {
-        fprintf(ctx->log_file, ";CH%d", i + 1);
+        if (i < MODBUS_NUM_CHANNELS) {
+            fprintf(ctx->log_file, ";%s", channel_names[i]);
+        } else {
+            fprintf(ctx->log_file, ";CANAL%d", i + 1);
+        }
     }
 
     // Adicionar colunas de status dos relés
@@ -229,7 +344,7 @@ bool datalogger_convert_modbus_data(const modbus_data_t* modbus_data,
         return false;
     }
 
-    // Converter dados Modbus dos 7 canais do NT18B07
+    // Converter dados Modbus dos canais configurados
     for (int i = 0; i < MODBUS_NUM_CHANNELS; i++) {
         record->ch_temp[i] = modbus_data->ch_temp[i];
         record->ch_valid[i] = modbus_data->ch_valid[i];
@@ -246,7 +361,7 @@ bool datalogger_write_record(datalogger_context_t* ctx, const datalogger_record_
     char datetime_str[64];
     strftime(datetime_str, sizeof(datetime_str), "%d/%m/%Y %H:%M:%S", &record->timestamp);
 
-    // Escrever registro no formato: R;Data Hora;CH1;CH2;...;CHn (dinâmico)
+    // Escrever registro no formato: R;Data Hora;PR1;PR2;AC;DC (dinâmico)
     fprintf(ctx->log_file, "%u;%s", record->record_number, datetime_str);
 
     // Escrever temperaturas apenas dos canais configurados
@@ -390,10 +505,10 @@ bool datalogger_create_tables(datalogger_context_t* ctx) {
         "IndexID INTEGER PRIMARY KEY AUTOINCREMENT,"
         "CollectTime INTEGER NOT NULL");
 
-    // Adicionar colunas de canais dinamicamente
+    // Adicionar colunas de canais dinamicamente (PR1, PR2, AC, DC, NTC1R, NTC2R)
     for (int i = 0; i < ctx->num_channels; i++) {
         char ch_column[64];
-        snprintf(ch_column, sizeof(ch_column), ",CH%d REAL NOT NULL", i + 1);
+        snprintf(ch_column, sizeof(ch_column), ",%s REAL NOT NULL", DB_CHANNEL_COLUMNS[i]);
         strncat(create_data_table, ch_column, sizeof(create_data_table) - strlen(create_data_table) - 1);
     }
 
@@ -407,6 +522,11 @@ bool datalogger_create_tables(datalogger_context_t* ctx) {
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Erro ao criar tabela DataGrpData: %s\n", err_msg);
         sqlite3_free(err_msg);
+        return false;
+    }
+
+    // Migrar bancos legados (CH1..CH4) para nomenclatura nova (PR1/PR2/AC/DC)
+    if (!db_migrate_channel_columns(ctx->db)) {
         return false;
     }
 
@@ -462,10 +582,10 @@ bool datalogger_convert_to_db_record(const datalogger_record_t* txt_record,
     time_t timestamp = mktime((struct tm*)&txt_record->timestamp);
     db_record->CollectTime = (long long)timestamp * 1000;
 
-    // Converter temperaturas dos 7 canais (arredondar para 1 casa decimal)
+    // Converter temperaturas/tensões dos canais (arredondar para 1 casa decimal)
     float* ch_fields[MODBUS_NUM_CHANNELS] = {
-        &db_record->CH1, &db_record->CH2, &db_record->CH3, &db_record->CH4,
-        &db_record->CH5, &db_record->CH6, &db_record->CH7
+        &db_record->PR1, &db_record->PR2, &db_record->AC, &db_record->DC,
+        &db_record->NTC1R, &db_record->NTC2R
     };
 
     for (int i = 0; i < MODBUS_NUM_CHANNELS; i++) {
@@ -497,7 +617,7 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
 
     for (int i = 0; i < ctx->num_channels; i++) {
         char ch_col[16];
-        snprintf(ch_col, sizeof(ch_col), ",CH%d", i + 1);
+        snprintf(ch_col, sizeof(ch_col), ",%s", DB_CHANNEL_COLUMNS[i]);
         strncat(columns, ch_col, sizeof(columns) - strlen(columns) - 1);
         strncat(values, ",ROUND(?, 1)", sizeof(values) - strlen(values) - 1);
     }
@@ -518,10 +638,10 @@ bool datalogger_insert_db_record(datalogger_context_t* ctx,
     // Bind dos parâmetros dinamicamente
     sqlite3_bind_int64(stmt, 1, db_record->CollectTime);
 
-    // Array de ponteiros para os campos de temperatura (todos os 7 canais)
+    // Array de ponteiros para os campos dos canais
     const float* ch_fields[MODBUS_NUM_CHANNELS] = {
-        &db_record->CH1, &db_record->CH2, &db_record->CH3, &db_record->CH4,
-        &db_record->CH5, &db_record->CH6, &db_record->CH7
+        &db_record->PR1, &db_record->PR2, &db_record->AC, &db_record->DC,
+        &db_record->NTC1R, &db_record->NTC2R
     };
 
     // Fazer bind apenas dos canais configurados
@@ -573,6 +693,91 @@ bool datalogger_update_db_info(datalogger_context_t* ctx) {
     return true;
 }
 
+static bool datalogger_init_secondary_database(datalogger_context_t* ctx) {
+    if (!ctx) return false;
+
+    int rc = sqlite3_open(ctx->secondary_db_file_path, &ctx->secondary_db);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Erro ao abrir banco SQLite secundário: %s\n", sqlite3_errmsg(ctx->secondary_db));
+        sqlite3_close(ctx->secondary_db);
+        ctx->secondary_db = NULL;
+        return false;
+    }
+
+    const char* create_table_sql =
+        "CREATE TABLE IF NOT EXISTS SecondaryData ("
+        "IndexID INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "CollectTime INTEGER NOT NULL,"
+        "N1R REAL,"
+        "N2R REAL,"
+        "T1 REAL,"
+        "T2 REAL"
+        ");";
+
+    char* err_msg = NULL;
+    rc = sqlite3_exec(ctx->secondary_db, create_table_sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Erro ao criar tabela SecondaryData: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        sqlite3_close(ctx->secondary_db);
+        ctx->secondary_db = NULL;
+        return false;
+    }
+
+    printf("📊 Banco SQLite secundário inicializado: %s\n", ctx->secondary_db_file_path);
+    return true;
+}
+
+static bool datalogger_insert_secondary_data(datalogger_context_t* ctx, const struct tm* tm_info,
+                                             bool n1r_valid, float n1r,
+                                             bool n2r_valid, float n2r,
+                                             bool t1_valid, float t1,
+                                             bool t2_valid, float t2) {
+    if (!ctx || !ctx->secondary_db || !tm_info) return false;
+
+    time_t timestamp = mktime((struct tm*)tm_info);
+    long long collect_time_ms = (long long)timestamp * 1000LL;
+
+    const char* sql =
+        "INSERT INTO SecondaryData (CollectTime, N1R, N2R, T1, T2) VALUES (?, ?, ?, ?, ?);";
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = sqlite3_prepare_v2(ctx->secondary_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Erro ao preparar insert secundário: %s\n", sqlite3_errmsg(ctx->secondary_db));
+        return false;
+    }
+
+    sqlite3_bind_int64(stmt, 1, collect_time_ms);
+    if (n1r_valid) sqlite3_bind_double(stmt, 2, (double)n1r); else sqlite3_bind_null(stmt, 2);
+    if (n2r_valid) sqlite3_bind_double(stmt, 3, (double)n2r); else sqlite3_bind_null(stmt, 3);
+    if (t1_valid) sqlite3_bind_double(stmt, 4, round((double)t1 * 10.0) / 10.0); else sqlite3_bind_null(stmt, 4);
+    if (t2_valid) sqlite3_bind_double(stmt, 5, round((double)t2 * 10.0) / 10.0); else sqlite3_bind_null(stmt, 5);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE);
+}
+
+bool datalogger_log_secondary_data(datalogger_context_t* ctx,
+                                   bool n1r_valid, float n1r,
+                                   bool n2r_valid, float n2r,
+                                   bool t1_valid, float t1,
+                                   bool t2_valid, float t2) {
+    if (!ctx || !ctx->initialized || !ctx->secondary_db) return false;
+
+    struct tm tm_info;
+    if (!datalogger_get_rtc_time(&tm_info)) {
+        return false;
+    }
+
+    return datalogger_insert_secondary_data(ctx, &tm_info,
+                                            n1r_valid, n1r,
+                                            n2r_valid, n2r,
+                                            t1_valid, t1,
+                                            t2_valid, t2);
+}
+
 /**
  * @brief Finaliza o banco de dados SQLite
  */
@@ -588,5 +793,11 @@ void datalogger_cleanup_database(datalogger_context_t* ctx) {
         ctx->db = NULL;
 
         printf("📊 Banco SQLite finalizado\n");
+    }
+
+    if (ctx->secondary_db) {
+        sqlite3_close(ctx->secondary_db);
+        ctx->secondary_db = NULL;
+        printf("📊 Banco SQLite secundário finalizado\n");
     }
 }

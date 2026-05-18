@@ -1,12 +1,13 @@
 # Makefile para o projeto NovaTherm DataLogger (ARMv7 only)
 
-.PHONY: help setup check configure-lcd configure-lvgl configure-st7567 build build-lcd build-lvgl build-st7567 deploy deploy-lcd deploy-lvgl deploy-st7567 test info clean rebuild
+.PHONY: help setup check configure-lcd configure-st7789 build build-lcd build-st7789 deploy deploy-lcd deploy-st7789 test info clean rebuild
 
 # Configuracoes
 BUILD_DIR = build-rpi
 APP_NAME = app_armv7
 RPI_IP ?= 192.168.3.22
 RPI_USER ?= nova
+LVGL_DIR ?=
 
 help:
 	@echo "=== NovaTherm DataLogger - Comandos Disponiveis ==="
@@ -17,20 +18,17 @@ help:
 	@echo ""
 	@echo "Perfis de display (sempre em $(BUILD_DIR)):"
 	@echo "  make configure-lcd   - LCD 20x4 I2C (padrao)"
-	@echo "  make configure-lvgl  - ILI9341 + LVGL"
-	@echo "  make configure-st7567- ST7567 128x64"
+	@echo "  make configure-st7789 LVGL_DIR=/caminho/lvgl - ST7789 + LVGL + EC11"
 	@echo ""
 	@echo "Compilacao:"
 	@echo "  make build           - Compila perfil atualmente configurado em $(BUILD_DIR)"
 	@echo "  make build-lcd       - Reconfigura para LCD e compila"
-	@echo "  make build-lvgl      - Reconfigura para LVGL e compila"
-	@echo "  make build-st7567    - Reconfigura para ST7567 e compila"
+	@echo "  make build-st7789 LVGL_DIR=/caminho/lvgl - Reconfigura ST7789 e compila"
 	@echo ""
 	@echo "Deploy:"
 	@echo "  make deploy          - Envia $(BUILD_DIR)/bin/$(APP_NAME)"
 	@echo "  make deploy-lcd      - build-lcd + deploy"
-	@echo "  make deploy-lvgl     - build-lvgl + deploy"
-	@echo "  make deploy-st7567   - build-st7567 + deploy"
+	@echo "  make deploy-st7789 LVGL_DIR=/caminho/lvgl - build-st7789 + deploy"
 	@echo "  make deploy RPI_IP=<ip> RPI_USER=<user>"
 	@echo ""
 	@echo "Outros:"
@@ -52,19 +50,20 @@ check:
 configure-lcd:
 	@echo "Configurando CMake para LCD 20x4 em $(BUILD_DIR)..."
 	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
-		-DUSE_LVGL_ILI9341=OFF -DUSE_ST7567=OFF -DUSE_LCD_I2C=ON \
+		-DUSE_LCD_I2C=ON \
+		-DUSE_ST7789_EC11=OFF \
 		-B $(BUILD_DIR) -S .
 
-configure-lvgl:
-	@echo "Configurando CMake para ILI9341 + LVGL em $(BUILD_DIR)..."
+configure-st7789:
+	@if [ -z "$(LVGL_DIR)" ]; then \
+		echo "Defina LVGL_DIR para o caminho do LVGL (ex.: make configure-st7789 LVGL_DIR=/home/nova/lvgl)"; \
+		exit 1; \
+	fi
+	@echo "Configurando CMake para ST7789 + LVGL em $(BUILD_DIR)..."
 	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
-		-DUSE_LVGL_ILI9341=ON -DUSE_ST7567=OFF -DUSE_LCD_I2C=OFF \
-		-B $(BUILD_DIR) -S .
-
-configure-st7567:
-	@echo "Configurando CMake para ST7567 em $(BUILD_DIR)..."
-	@cmake -DCMAKE_TOOLCHAIN_FILE=./user_cross_compile_setup.cmake \
-		-DUSE_LVGL_ILI9341=OFF -DUSE_ST7567=ON -DUSE_LCD_I2C=OFF \
+		-DUSE_LCD_I2C=OFF \
+		-DUSE_ST7789_EC11=ON \
+		-DLVGL_DIR=$(LVGL_DIR) \
 		-B $(BUILD_DIR) -S .
 
 build:
@@ -77,10 +76,7 @@ build:
 	@echo "Compilacao concluida: $(BUILD_DIR)/bin/$(APP_NAME)"
 
 build-lcd: configure-lcd build
-
-build-lvgl: configure-lvgl build
-
-build-st7567: configure-st7567 build
+build-st7789: configure-st7789 build
 
 deploy:
 	@echo "Fazendo deploy ARMv7 para $(RPI_USER)@$(RPI_IP)..."
@@ -92,10 +88,7 @@ deploy:
 	@echo "Deploy concluido: ~/$(APP_NAME)"
 
 deploy-lcd: build-lcd deploy
-
-deploy-lvgl: build-lvgl deploy
-
-deploy-st7567: build-st7567 deploy
+deploy-st7789: build-st7789 deploy
 
 test: check
 	@echo "Executando testes basicos..."
@@ -128,7 +121,7 @@ info:
 	@echo ""
 	@if [ -f "$(BUILD_DIR)/CMakeCache.txt" ]; then \
 		echo "Perfil de display no cache atual:"; \
-		grep -E "USE_LCD_I2C:BOOL|USE_LVGL_ILI9341:BOOL|USE_ST7567:BOOL" $(BUILD_DIR)/CMakeCache.txt || true; \
+		grep -E "USE_LCD_I2C:BOOL|USE_ST7789_EC11:BOOL|LVGL_DIR:" $(BUILD_DIR)/CMakeCache.txt || true; \
 		echo ""; \
 	fi
 	@if [ -f "$(BUILD_DIR)/bin/$(APP_NAME)" ]; then \
@@ -137,6 +130,6 @@ info:
 		echo "Arquitetura: $$(file $(BUILD_DIR)/bin/$(APP_NAME) | cut -d: -f2)"; \
 		echo "Dependencias dinamicas (NEEDED):"; \
 		arm-linux-gnueabihf-readelf -d $(BUILD_DIR)/bin/$(APP_NAME) 2>/dev/null | grep NEEDED || echo "  nenhuma"; \
-	else \
-		echo "Executavel ainda nao compilado"; \
-	fi
+		else \
+			echo "Executavel ainda nao compilado"; \
+		fi

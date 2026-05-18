@@ -863,7 +863,7 @@ int usb_auto_extract_all_logs(const char* source_dir, const usb_callbacks_t* cal
         if (callbacks && callbacks->on_complete) {
             char complete_msg[256];
             snprintf(complete_msg, sizeof(complete_msg),
-                     "%d bancos de dados extraídos com sucesso para USB", file_count);
+                     "%d bancos de dados extraidos com sucesso para USB", file_count);
             callbacks->on_complete(USB_SUCCESS, complete_msg);
         }
 

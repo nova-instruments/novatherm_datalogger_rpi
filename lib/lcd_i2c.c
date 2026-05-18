@@ -111,6 +111,7 @@ lcd_context_t* lcd_init(void) {
     ctx->last_displayed_max = -999.0f;
     ctx->last_displayed_min = 999.0f;
     ctx->screen_needs_redraw = true;  // Forçar desenho inicial
+    ctx->relay_test_target = LCD_RELAY_TEST_TARGET_LAMP;
     
     // Sequência de inicialização do LCD (modo 4 bits)
     usleep(50000);  // Aguardar 50ms após power-on
@@ -404,9 +405,9 @@ static void lcd_display_main_temperature(lcd_context_t* ctx, const modbus_data_t
  *
  * Layout:
  * ┌────────────────────┐
- * │ CH2:  8.5°C        │  ← Linha 0: Canal 2
- * │ CH3: 10.2°C        │  ← Linha 1: Canal 3
- * │ CH4: 12.8°C        │  ← Linha 2: Canal 4
+ * │ PR2:  8.5°C        │  ← Linha 0: PR2
+ * │ AC:  10.2V         │  ← Linha 1: AC
+ * │ DC:  12.8V         │  ← Linha 2: DC
  * │ 🚪 SP: 5.0         │  ← Linha 3: Porta + Setpoint
  * └────────────────────┘
  */
@@ -424,30 +425,30 @@ static void lcd_display_info_screen(lcd_context_t* ctx, const modbus_data_t* dat
     // Limpar display
     lcd_clear(ctx);
 
-    // Linha 0: CH2
+    // Linha 0: PR2
     lcd_set_cursor(ctx, 0, 0);
     if (data->ch_valid[1] && !data->ch_error[1]) {
-        snprintf(line, sizeof(line), "CH2: %5.1f%cC", data->ch_temp[1], 0xDF);
+        snprintf(line, sizeof(line), "PR2: %5.1f%cC", data->ch_temp[1], 0xDF);
     } else {
-        snprintf(line, sizeof(line), "CH2: ----%cC", 0xDF);
+        snprintf(line, sizeof(line), "PR2: ----%cC", 0xDF);
     }
     lcd_print(ctx, line);
 
-    // Linha 1: CH3
+    // Linha 1: AC
     lcd_set_cursor(ctx, 0, 1);
     if (data->ch_valid[2] && !data->ch_error[2]) {
-        snprintf(line, sizeof(line), "CH3: %5.1f%cC", data->ch_temp[2], 0xDF);
+        snprintf(line, sizeof(line), "AC:  %6.1fV", data->ch_temp[2]);
     } else {
-        snprintf(line, sizeof(line), "CH3: ----%cC", 0xDF);
+        snprintf(line, sizeof(line), "AC:  ------V");
     }
     lcd_print(ctx, line);
 
-    // Linha 2: CH4
+    // Linha 2: DC
     lcd_set_cursor(ctx, 0, 2);
     if (data->ch_valid[3] && !data->ch_error[3]) {
-        snprintf(line, sizeof(line), "CH4: %5.1f%cC", data->ch_temp[3], 0xDF);
+        snprintf(line, sizeof(line), "DC:  %6.1fV", data->ch_temp[3]);
     } else {
-        snprintf(line, sizeof(line), "CH4: ----%cC", 0xDF);
+        snprintf(line, sizeof(line), "DC:  ------V");
     }
     lcd_print(ctx, line);
 
@@ -528,10 +529,90 @@ static void lcd_display_diagnostics(lcd_context_t* ctx, bool lamp_on, bool diale
     lcd_print(ctx, line);
 }
 
+/**
+ * @brief Exibe tela 3: Teste temporário de relés Modbus
+ *
+ * Controle esperado:
+ * - DEC: alterna seleção (Lâmpada / Discadora)
+ * - INC: alterna ON/OFF do relé selecionado
+ */
+static void lcd_display_relay_test_screen(lcd_context_t* ctx, bool lamp_on, bool dialer_on) {
+    if (!ctx) return;
+
+    lcd_clear(ctx);
+
+    char line[21];
+
+    // Linha 0: Título
+    lcd_set_cursor(ctx, 0, 0);
+    lcd_print(ctx, " TESTE RELES MODBUS ");
+
+    // Linha 1: Lâmpada
+    lcd_set_cursor(ctx, 0, 1);
+    snprintf(line, sizeof(line), "%c Lampada: %s      ",
+             (ctx->relay_test_target == LCD_RELAY_TEST_TARGET_LAMP) ? '>' : ' ',
+             lamp_on ? "ON " : "OFF");
+    lcd_print(ctx, line);
+
+    // Linha 2: Discadora
+    lcd_set_cursor(ctx, 0, 2);
+    snprintf(line, sizeof(line), "%c Discadora: %s    ",
+             (ctx->relay_test_target == LCD_RELAY_TEST_TARGET_DIALER) ? '>' : ' ',
+             dialer_on ? "ON " : "OFF");
+    lcd_print(ctx, line);
+
+    // Linha 3: Instruções
+    lcd_set_cursor(ctx, 0, 3);
+    lcd_print(ctx, "DEC=SEL  INC=TOGGLE");
+}
+
+static void lcd_display_slave2_temps_screen(lcd_context_t* ctx, const modbus_data_t* data,
+                                            bool t1_valid, float t1,
+                                            bool t2_valid, float t2) {
+    if (!ctx) return;
+
+    lcd_clear(ctx);
+
+    char line[21];
+
+    lcd_set_cursor(ctx, 0, 0);
+    lcd_print(ctx, " S2 T1/T2 + S1 NTCs ");
+
+    lcd_set_cursor(ctx, 0, 1);
+    if (t1_valid) {
+        snprintf(line, sizeof(line), "T1 (0x200): %5.1fC", t1);
+    } else {
+        snprintf(line, sizeof(line), "T1 (0x200):   ERR ");
+    }
+    lcd_print(ctx, line);
+
+    lcd_set_cursor(ctx, 0, 2);
+    if (t2_valid) {
+        snprintf(line, sizeof(line), "T2 (0x201): %5.1fC", t2);
+    } else {
+        snprintf(line, sizeof(line), "T2 (0x201):   ERR ");
+    }
+    lcd_print(ctx, line);
+
+    lcd_set_cursor(ctx, 0, 3);
+    if (data && data->ch_valid[4] && data->ch_valid[5]) {
+        snprintf(line, sizeof(line), "N1:%4.0f N2:%4.0f", data->ch_temp[4], data->ch_temp[5]);
+    } else if (data && data->ch_valid[4]) {
+        snprintf(line, sizeof(line), "N1:%4.0f N2: ERR", data->ch_temp[4]);
+    } else if (data && data->ch_valid[5]) {
+        snprintf(line, sizeof(line), "N1: ERR N2:%4.0f", data->ch_temp[5]);
+    } else {
+        snprintf(line, sizeof(line), "N1: ERR N2: ERR");
+    }
+    lcd_print(ctx, line);
+}
+
 void lcd_update_current_screen(lcd_context_t* ctx, const char* device_name,
                                const modbus_data_t* data, uint32_t record_count,
                                bool lamp_on, bool dialer_on, bool compressor_on, bool heater_on,
-                               bool door_open) {
+                               bool door_open,
+                               bool slave2_t1_valid, float slave2_t1,
+                               bool slave2_t2_valid, float slave2_t2) {
     if (!ctx || !ctx->initialized) return;
 
     switch (ctx->current_screen) {
@@ -550,9 +631,39 @@ void lcd_update_current_screen(lcd_context_t* ctx, const char* device_name,
             lcd_display_diagnostics(ctx, lamp_on, dialer_on, compressor_on, heater_on);
             break;
 
+        case LCD_SCREEN_RELAY_TEST:
+            // Tela 3: Teste temporário de relés Modbus
+            lcd_display_relay_test_screen(ctx, lamp_on, dialer_on);
+            break;
+
+        case LCD_SCREEN_SLAVE2_TEMPS:
+            // Tela 4: Temperaturas T1/T2 do slave 2
+            lcd_display_slave2_temps_screen(ctx, data, slave2_t1_valid, slave2_t1,
+                                            slave2_t2_valid, slave2_t2);
+            break;
+
         default:
             break;
     }
+}
+
+bool lcd_is_relay_test_screen(lcd_context_t* ctx) {
+    return (ctx && ctx->current_screen == LCD_SCREEN_RELAY_TEST);
+}
+
+void lcd_relay_test_toggle_target(lcd_context_t* ctx) {
+    if (!ctx) return;
+
+    if (ctx->relay_test_target == LCD_RELAY_TEST_TARGET_LAMP) {
+        ctx->relay_test_target = LCD_RELAY_TEST_TARGET_DIALER;
+    } else {
+        ctx->relay_test_target = LCD_RELAY_TEST_TARGET_LAMP;
+    }
+}
+
+lcd_relay_test_target_t lcd_relay_test_get_target(lcd_context_t* ctx) {
+    if (!ctx) return LCD_RELAY_TEST_TARGET_LAMP;
+    return ctx->relay_test_target;
 }
 
 /**
@@ -875,4 +986,3 @@ void lcd_set_wifi_status(lcd_context_t* ctx, bool connected) {
     if (!ctx) return;
     ctx->wifi_connected = connected;
 }
-

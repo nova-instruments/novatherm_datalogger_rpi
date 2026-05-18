@@ -12,16 +12,23 @@
 
 // Variáveis globais para controle dos GPIOs
 static struct gpiod_chip *gpio_chip = NULL;
-static struct gpiod_line *lamp_line = NULL;
-static struct gpiod_line *dialer_line = NULL;
 static struct gpiod_line *compressor_line = NULL;
 static struct gpiod_line *heater_line = NULL;
+static modbus_context_t* relay_modbus_ctx = NULL;
+static bool lamp_state_cache = false;
+static bool dialer_state_cache = false;
+
+void relay_set_modbus_context(modbus_context_t* ctx) {
+    relay_modbus_ctx = ctx;
+}
 
 /**
  * @brief Inicializa o controle dos relés
  */
 int relay_init(void) {
-    if (gpio_chip && lamp_line && dialer_line && compressor_line && heater_line) {
+    int ret;
+
+    if (gpio_chip && compressor_line && heater_line) {
         printf("Relés já inicializados\n");
         return 0;
     }
@@ -33,111 +40,55 @@ int relay_init(void) {
         return -1;
     }
 
-    // Obter linha do GPIO 24 (Lâmpada)
-    lamp_line = gpiod_chip_get_line(gpio_chip, RELAY_LAMP_GPIO);
-    if (!lamp_line) {
-        fprintf(stderr, "Erro ao obter linha GPIO %d (Lâmpada)\n", RELAY_LAMP_GPIO);
-        gpiod_chip_close(gpio_chip);
-        gpio_chip = NULL;
-        return -1;
-    }
-
-    // Obter linha do GPIO 25 (Discadora)
-    dialer_line = gpiod_chip_get_line(gpio_chip, RELAY_DIALER_GPIO);
-    if (!dialer_line) {
-        fprintf(stderr, "Erro ao obter linha GPIO %d (Discadora)\n", RELAY_DIALER_GPIO);
-        gpiod_chip_close(gpio_chip);
-        gpio_chip = NULL;
-        lamp_line = NULL;
-        return -1;
-    }
-
-    // Configurar GPIO 24 como saída (Lâmpada) - iniciar desligado
-    int ret = gpiod_line_request_output(lamp_line, "relay_lamp", 0);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao configurar GPIO %d como saída\n", RELAY_LAMP_GPIO);
-        gpiod_chip_close(gpio_chip);
-        gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
-        return -1;
-    }
-
-    // Configurar GPIO 25 como saída (Discadora) - iniciar desligado
-    ret = gpiod_line_request_output(dialer_line, "relay_dialer", 0);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao configurar GPIO %d como saída\n", RELAY_DIALER_GPIO);
-        gpiod_line_release(lamp_line);
-        gpiod_chip_close(gpio_chip);
-        gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
-        return -1;
-    }
-
-    // Obter linha do GPIO 4 (Compressor)
+    // Obter linha do GPIO do compressor
     compressor_line = gpiod_chip_get_line(gpio_chip, RELAY_COMPRESSOR_GPIO);
     if (!compressor_line) {
         fprintf(stderr, "Erro ao obter linha GPIO %d (Compressor)\n", RELAY_COMPRESSOR_GPIO);
-        gpiod_line_release(lamp_line);
-        gpiod_line_release(dialer_line);
         gpiod_chip_close(gpio_chip);
         gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
         return -1;
     }
 
-    // Configurar GPIO 4 como saída (Compressor) - iniciar desligado (lógica inversa: HIGH = desligado)
-    ret = gpiod_line_request_output(compressor_line, "relay_compressor", 1);
+    // Configurar GPIO do compressor como saída (iniciar desligado)
+    ret = gpiod_line_request_output(compressor_line, "relay_compressor", RELAY_GPIO_INACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao configurar GPIO %d como saída\n", RELAY_COMPRESSOR_GPIO);
-        gpiod_line_release(lamp_line);
-        gpiod_line_release(dialer_line);
         gpiod_chip_close(gpio_chip);
         gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
         compressor_line = NULL;
         return -1;
     }
 
-    // Obter linha do GPIO 17 (Resistência)
+    // Obter linha do GPIO da resistência
     heater_line = gpiod_chip_get_line(gpio_chip, RELAY_HEATER_GPIO);
     if (!heater_line) {
         fprintf(stderr, "Erro ao obter linha GPIO %d (Resistência)\n", RELAY_HEATER_GPIO);
-        gpiod_line_release(lamp_line);
-        gpiod_line_release(dialer_line);
         gpiod_line_release(compressor_line);
         gpiod_chip_close(gpio_chip);
         gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
         compressor_line = NULL;
         return -1;
     }
 
-    // Configurar GPIO 17 como saída (Resistência) - iniciar desligado (lógica inversa: HIGH = desligado)
-    ret = gpiod_line_request_output(heater_line, "relay_heater", 1);
+    // Configurar GPIO da resistência como saída (iniciar desligada)
+    ret = gpiod_line_request_output(heater_line, "relay_heater", RELAY_GPIO_INACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao configurar GPIO %d como saída\n", RELAY_HEATER_GPIO);
-        gpiod_line_release(lamp_line);
-        gpiod_line_release(dialer_line);
         gpiod_line_release(compressor_line);
         gpiod_chip_close(gpio_chip);
         gpio_chip = NULL;
-        lamp_line = NULL;
-        dialer_line = NULL;
         compressor_line = NULL;
         heater_line = NULL;
         return -1;
     }
 
     printf("💡 Relés inicializados:\n");
-    printf("   - Lâmpada:     GPIO %d (pino físico 18)\n", RELAY_LAMP_GPIO);
-    printf("   - Discadora:   GPIO %d (pino físico 22)\n", RELAY_DIALER_GPIO);
-    printf("   - Compressor:  GPIO %d (pino físico 7) [lógica inversa]\n", RELAY_COMPRESSOR_GPIO);
-    printf("   - Resistência: GPIO %d (pino físico 11) [lógica inversa]\n", RELAY_HEATER_GPIO);
+    printf("   - Lâmpada:     Coil Modbus %d\n", RELAY_LAMP_COIL);
+    printf("   - Discadora:   Coil Modbus %d\n", RELAY_DIALER_COIL);
+    printf("   - Compressor:  GPIO %d (pino físico 18) [ativo em %s]\n",
+           RELAY_COMPRESSOR_GPIO, RELAY_GPIO_ACTIVE_LEVEL ? "HIGH" : "LOW");
+    printf("   - Resistência: GPIO %d (pino físico 22) [ativo em %s]\n",
+           RELAY_HEATER_GPIO, RELAY_GPIO_ACTIVE_LEVEL ? "HIGH" : "LOW");
 
     return 0;
 }
@@ -146,30 +97,16 @@ int relay_init(void) {
  * @brief Finaliza o controle dos relés e libera recursos
  */
 void relay_cleanup(void) {
-    if (lamp_line) {
-        // Garantir que a lâmpada está desligada
-        gpiod_line_set_value(lamp_line, 0);
-        gpiod_line_release(lamp_line);
-        lamp_line = NULL;
-    }
-
-    if (dialer_line) {
-        // Garantir que a discadora está desligada
-        gpiod_line_set_value(dialer_line, 0);
-        gpiod_line_release(dialer_line);
-        dialer_line = NULL;
-    }
-
     if (compressor_line) {
-        // Garantir que o compressor está desligado (lógica inversa: HIGH = desligado)
-        gpiod_line_set_value(compressor_line, 1);
+        // Garantir que o compressor está desligado
+        gpiod_line_set_value(compressor_line, RELAY_GPIO_INACTIVE_LEVEL);
         gpiod_line_release(compressor_line);
         compressor_line = NULL;
     }
 
     if (heater_line) {
-        // Garantir que a resistência está desligada (lógica inversa: HIGH = desligado)
-        gpiod_line_set_value(heater_line, 1);
+        // Garantir que a resistência está desligada
+        gpiod_line_set_value(heater_line, RELAY_GPIO_INACTIVE_LEVEL);
         gpiod_line_release(heater_line);
         heater_line = NULL;
     }
@@ -183,83 +120,83 @@ void relay_cleanup(void) {
 }
 
 /**
- * @brief Liga a lâmpada (relé GPIO 24)
+ * @brief Liga a lâmpada (coil Modbus 0)
  */
 int relay_lamp_on(void) {
-    if (!lamp_line) {
-        fprintf(stderr, "Erro: Relé da lâmpada não inicializado\n");
+    if (!relay_modbus_ctx) {
+        fprintf(stderr, "Erro: Contexto Modbus não definido para lâmpada\n");
         return -1;
     }
 
-    int ret = gpiod_line_set_value(lamp_line, 1);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao ligar lâmpada (GPIO %d)\n", RELAY_LAMP_GPIO);
+    if (!modbus_write_coil(relay_modbus_ctx, RELAY_LAMP_COIL, true)) {
+        fprintf(stderr, "Erro ao ligar lâmpada (coil %d)\n", RELAY_LAMP_COIL);
         return -1;
     }
 
-    printf("💡 Lâmpada LIGADA (GPIO %d)\n", RELAY_LAMP_GPIO);
+    lamp_state_cache = true;
+    printf("💡 Lâmpada LIGADA (coil %d)\n", RELAY_LAMP_COIL);
     return 0;
 }
 
 /**
- * @brief Desliga a lâmpada (relé GPIO 24)
+ * @brief Desliga a lâmpada (coil Modbus 0)
  */
 int relay_lamp_off(void) {
-    if (!lamp_line) {
-        fprintf(stderr, "Erro: Relé da lâmpada não inicializado\n");
+    if (!relay_modbus_ctx) {
+        fprintf(stderr, "Erro: Contexto Modbus não definido para lâmpada\n");
         return -1;
     }
 
-    int ret = gpiod_line_set_value(lamp_line, 0);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao desligar lâmpada (GPIO %d)\n", RELAY_LAMP_GPIO);
+    if (!modbus_write_coil(relay_modbus_ctx, RELAY_LAMP_COIL, false)) {
+        fprintf(stderr, "Erro ao desligar lâmpada (coil %d)\n", RELAY_LAMP_COIL);
         return -1;
     }
 
-    printf("💡 Lâmpada DESLIGADA (GPIO %d)\n", RELAY_LAMP_GPIO);
+    lamp_state_cache = false;
+    printf("💡 Lâmpada DESLIGADA (coil %d)\n", RELAY_LAMP_COIL);
     return 0;
 }
 
 /**
- * @brief Liga a discadora (relé GPIO 25)
+ * @brief Liga a discadora (coil Modbus 1)
  */
 int relay_dialer_on(void) {
-    if (!dialer_line) {
-        fprintf(stderr, "Erro: Relé da discadora não inicializado\n");
+    if (!relay_modbus_ctx) {
+        fprintf(stderr, "Erro: Contexto Modbus não definido para discadora\n");
         return -1;
     }
 
-    int ret = gpiod_line_set_value(dialer_line, 1);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao ligar discadora (GPIO %d)\n", RELAY_DIALER_GPIO);
+    if (!modbus_write_coil(relay_modbus_ctx, RELAY_DIALER_COIL, true)) {
+        fprintf(stderr, "Erro ao ligar discadora (coil %d)\n", RELAY_DIALER_COIL);
         return -1;
     }
 
-    printf("📞 Discadora LIGADA (GPIO %d)\n", RELAY_DIALER_GPIO);
+    dialer_state_cache = true;
+    printf("📞 Discadora LIGADA (coil %d)\n", RELAY_DIALER_COIL);
     return 0;
 }
 
 /**
- * @brief Desliga a discadora (relé GPIO 25)
+ * @brief Desliga a discadora (coil Modbus 1)
  */
 int relay_dialer_off(void) {
-    if (!dialer_line) {
-        fprintf(stderr, "Erro: Relé da discadora não inicializado\n");
+    if (!relay_modbus_ctx) {
+        fprintf(stderr, "Erro: Contexto Modbus não definido para discadora\n");
         return -1;
     }
 
-    int ret = gpiod_line_set_value(dialer_line, 0);
-    if (ret < 0) {
-        fprintf(stderr, "Erro ao desligar discadora (GPIO %d)\n", RELAY_DIALER_GPIO);
+    if (!modbus_write_coil(relay_modbus_ctx, RELAY_DIALER_COIL, false)) {
+        fprintf(stderr, "Erro ao desligar discadora (coil %d)\n", RELAY_DIALER_COIL);
         return -1;
     }
 
-    printf("📞 Discadora DESLIGADA (GPIO %d)\n", RELAY_DIALER_GPIO);
+    dialer_state_cache = false;
+    printf("📞 Discadora DESLIGADA (coil %d)\n", RELAY_DIALER_COIL);
     return 0;
 }
 
 /**
- * @brief Liga o compressor (GPIO 4) - Lógica inversa: LOW = ligado
+ * @brief Liga o compressor (GPIO 24)
  */
 int relay_compressor_on(void) {
     if (!compressor_line) {
@@ -267,7 +204,7 @@ int relay_compressor_on(void) {
         return -1;
     }
 
-    int ret = gpiod_line_set_value(compressor_line, 0);  // LOW = ligado
+    int ret = gpiod_line_set_value(compressor_line, RELAY_GPIO_ACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao ligar compressor (GPIO %d)\n", RELAY_COMPRESSOR_GPIO);
         return -1;
@@ -277,7 +214,7 @@ int relay_compressor_on(void) {
 }
 
 /**
- * @brief Desliga o compressor (GPIO 4) - Lógica inversa: HIGH = desligado
+ * @brief Desliga o compressor (GPIO 24)
  */
 int relay_compressor_off(void) {
     if (!compressor_line) {
@@ -285,7 +222,7 @@ int relay_compressor_off(void) {
         return -1;
     }
 
-    int ret = gpiod_line_set_value(compressor_line, 1);  // HIGH = desligado
+    int ret = gpiod_line_set_value(compressor_line, RELAY_GPIO_INACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao desligar compressor (GPIO %d)\n", RELAY_COMPRESSOR_GPIO);
         return -1;
@@ -295,7 +232,7 @@ int relay_compressor_off(void) {
 }
 
 /**
- * @brief Liga a resistência (GPIO 17) - Lógica inversa: LOW = ligado
+ * @brief Liga a resistência (GPIO 25)
  */
 int relay_heater_on(void) {
     if (!heater_line) {
@@ -303,7 +240,7 @@ int relay_heater_on(void) {
         return -1;
     }
 
-    int ret = gpiod_line_set_value(heater_line, 0);  // LOW = ligado
+    int ret = gpiod_line_set_value(heater_line, RELAY_GPIO_ACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao ligar resistência (GPIO %d)\n", RELAY_HEATER_GPIO);
         return -1;
@@ -313,7 +250,7 @@ int relay_heater_on(void) {
 }
 
 /**
- * @brief Desliga a resistência (GPIO 17) - Lógica inversa: HIGH = desligado
+ * @brief Desliga a resistência (GPIO 25)
  */
 int relay_heater_off(void) {
     if (!heater_line) {
@@ -321,7 +258,7 @@ int relay_heater_off(void) {
         return -1;
     }
 
-    int ret = gpiod_line_set_value(heater_line, 1);  // HIGH = desligado
+    int ret = gpiod_line_set_value(heater_line, RELAY_GPIO_INACTIVE_LEVEL);
     if (ret < 0) {
         fprintf(stderr, "Erro ao desligar resistência (GPIO %d)\n", RELAY_HEATER_GPIO);
         return -1;
@@ -348,18 +285,16 @@ int relay_control_lamp_by_door(bool door_open) {
  * @brief Obtém o estado atual da lâmpada
  */
 bool relay_lamp_is_on(void) {
-    if (!lamp_line) return false;
-    int value = gpiod_line_get_value(lamp_line);
-    return (value == 1);  // Lógica normal: HIGH = ON
+    // Retorna cache local para evitar polling contínuo de coil a cada refresh de tela
+    return lamp_state_cache;
 }
 
 /**
  * @brief Obtém o estado atual da discadora
  */
 bool relay_dialer_is_on(void) {
-    if (!dialer_line) return false;
-    int value = gpiod_line_get_value(dialer_line);
-    return (value == 1);  // Lógica normal: HIGH = ON
+    // Retorna cache local para evitar polling contínuo de coil a cada refresh de tela
+    return dialer_state_cache;
 }
 
 /**
@@ -368,7 +303,7 @@ bool relay_dialer_is_on(void) {
 bool relay_compressor_is_on(void) {
     if (!compressor_line) return false;
     int value = gpiod_line_get_value(compressor_line);
-    return (value == 0);  // Lógica inversa: LOW = ON
+    return (value == RELAY_GPIO_ACTIVE_LEVEL);
 }
 
 /**
@@ -377,6 +312,5 @@ bool relay_compressor_is_on(void) {
 bool relay_heater_is_on(void) {
     if (!heater_line) return false;
     int value = gpiod_line_get_value(heater_line);
-    return (value == 0);  // Lógica inversa: LOW = ON
+    return (value == RELAY_GPIO_ACTIVE_LEVEL);
 }
-

@@ -4,7 +4,7 @@
  * @author Nova Instruments
  * 
  * Entradas digitais:
- * - GPIO 10: Sensor de porta (pino físico 19)
+ * - GPIO 17: Sensor de porta (pino físico 11)
  */
 
 #ifndef INPUT_H
@@ -14,7 +14,10 @@
 #include <stdint.h>
 
 // Definições dos GPIOs de entrada
-#define INPUT_DOOR_GPIO  10  // Sensor de porta (pino físico 19)
+#define INPUT_DOOR_GPIO  17  // Sensor de porta (pino físico 11)
+// Nível lógico que representa PORTA ABERTA
+// 0 = ativa em nível baixo (open = LOW), 1 = ativa em nível alto (open = HIGH)
+#define INPUT_DOOR_OPEN_LEVEL 0
 
 /**
  * @brief Inicializa o monitoramento das entradas digitais
@@ -47,4 +50,3 @@ uint16_t input_door_get_state_uint16(void);
 void input_cleanup(void);
 
 #endif // INPUT_H
-
